@@ -16,6 +16,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+print("XHS_COOKIE前20字符:", os.getenv("XHS_COOKIE", "未读取到")[:20])
+
 app = FastAPI(title="社交媒体用户评论分析 API", version="1.0.0")
 
 app.add_middleware(
