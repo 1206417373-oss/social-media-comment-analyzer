@@ -107,15 +107,11 @@ async def _crawl_post(url: str, platform: str) -> dict:
     if platform == "xiaohongshu":
         from crawlers.xiaohongshu import fetch_post
         cookie = os.getenv("XHS_COOKIE", "")
+        if not cookie:
+            raise RuntimeError("请先在 .env 中配置 XHS_COOKIE")
         return await fetch_post(url, cookie)
 
-    # 其他平台暂未实现，返回模拟数据结构供前端调试
-    return {
-        "post_content": "[平台爬虫尚未实现，此为占位内容]",
-        "images": [],
-        "comments": ["暂未获取到评论数据"],
-        "comment_count": 0,
-    }
+    raise ValueError(f"平台 '{platform}' 的爬虫尚未实现")
 
 
 async def _call_deepseek(api_key: str, platform_name: str, post_data: dict) -> dict:
@@ -196,6 +192,10 @@ async def analyze(req: AnalyzeRequest):
     # 1. 爬取帖子数据
     try:
         post_data = await _crawl_post(req.url, req.platform)
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+    except RuntimeError as e:
+        return {"success": False, "error": str(e)}
     except Exception:
         return {"success": False, "error": "获取数据失败，请检查Cookie配置"}
 
