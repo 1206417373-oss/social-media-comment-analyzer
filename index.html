@@ -862,7 +862,6 @@ async function callDeepSeek(apiKey, platform, postContent, comments) {
 }
 
 // ===== 渲染结果 =====
-let chartInstance = null;
 let lastAnalysisData = null;
 
 function renderResult(data, commentCount, platform) {
@@ -894,8 +893,8 @@ function renderResult(data, commentCount, platform) {
   // 先显示结果区（确保canvas有尺寸，再初始化Chart.js）
   document.getElementById('resultSection').classList.add('visible');
 
-  // 饼图
-  renderChart(sent);
+  // 饼图（延迟初始化，确保canvas尺寸已就绪）
+  setTimeout(() => { renderChart(sent); }, 100);
 
   // ===== ① WHO =====
   const whoTypes = document.getElementById('whoUserTypes');
@@ -994,11 +993,11 @@ function escapeHtml(str) {
 }
 
 function renderChart(sent) {
-  if (chartInstance) {
-    chartInstance.destroy();
+  if (window.sentimentChart instanceof Chart) {
+    window.sentimentChart.destroy();
   }
   const ctx = document.getElementById('sentimentChart').getContext('2d');
-  chartInstance = new Chart(ctx, {
+  window.sentimentChart = new Chart(ctx, {
     type: 'pie',
     data: {
       labels: ['正面', '负面', '中性'],
