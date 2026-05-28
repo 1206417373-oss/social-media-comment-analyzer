@@ -1,0 +1,898 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>社交媒体用户评论分析工具</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: #f5f5f7;
+  color: #1f2937;
+  line-height: 1.6;
+  min-height: 100vh;
+}
+.container { max-width: 960px; margin: 0 auto; padding: 24px 20px 60px; }
+
+/* 头部 */
+.header { text-align: center; margin-bottom: 28px; }
+.header h1 { font-size: 26px; font-weight: 700; color: #4F46E5; }
+.header p { font-size: 14px; color: #6b7280; margin-top: 4px; }
+
+/* 设置栏 */
+.settings-bar {
+  background: #fff;
+  border-radius: 12px;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.settings-bar label { font-weight: 600; font-size: 14px; white-space: nowrap; }
+.settings-bar input[type="password"] {
+  flex: 1;
+  min-width: 240px;
+  padding: 8px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color .2s;
+}
+.settings-bar input[type="password"]:focus { border-color: #4F46E5; }
+.btn {
+  padding: 8px 20px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .2s;
+  white-space: nowrap;
+}
+.btn-primary { background: #4F46E5; color: #fff; }
+.btn-primary:hover { background: #4338CA; }
+.btn-primary:disabled { background: #9CA3AF; cursor: not-allowed; }
+.btn-outline { background: #fff; color: #4F46E5; border: 1px solid #4F46E5; }
+.btn-outline:hover { background: #EEF2FF; }
+.btn-success { background: #059669; color: #fff; }
+.btn-success:hover { background: #047857; }
+.status-tag {
+  font-size: 13px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: #D1FAE5;
+  color: #065F46;
+  font-weight: 600;
+}
+
+/* 输入区 */
+.input-section {
+  background: #fff;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  margin-bottom: 20px;
+}
+.input-section h2 {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.input-section h2::before {
+  content: '';
+  width: 4px;
+  height: 20px;
+  background: #4F46E5;
+  border-radius: 2px;
+  display: inline-block;
+}
+.platform-group { margin-bottom: 16px; }
+.platform-group label { font-weight: 600; font-size: 14px; display: block; margin-bottom: 8px; }
+.radio-group { display: flex; gap: 16px; flex-wrap: wrap; }
+.radio-group label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 400;
+  cursor: pointer;
+  padding: 6px 14px;
+  border: 1px solid #d1d5db;
+  border-radius: 20px;
+  transition: all .2s;
+}
+.radio-group input[type="radio"]:checked + span { color: #4F46E5; font-weight: 600; }
+.radio-group label:has(input:checked) { border-color: #4F46E5; background: #EEF2FF; }
+.radio-group input[type="radio"] { accent-color: #4F46E5; }
+
+.form-group { margin-bottom: 16px; }
+.form-group label { font-weight: 600; font-size: 14px; display: block; margin-bottom: 6px; }
+.form-group textarea {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 14px;
+  resize: vertical;
+  min-height: 100px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color .2s;
+}
+.form-group textarea:focus { border-color: #4F46E5; }
+.form-group .hint { font-size: 12px; color: #9CA3AF; margin-top: 4px; }
+
+.btn-analyze {
+  width: 100%;
+  padding: 14px;
+  font-size: 16px;
+  border-radius: 10px;
+}
+
+/* 结果区 */
+.result-section { display: none; }
+.result-section.visible { display: block; }
+
+/* 指标卡 */
+.metric-cards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.metric-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px;
+  text-align: center;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06);
+}
+.metric-card .number { font-size: 32px; font-weight: 800; color: #4F46E5; }
+.metric-card .label { font-size: 13px; color: #6b7280; margin-top: 4px; }
+
+/* 图表+痛点布局 */
+.analysis-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+/* 图表卡片 */
+.chart-card, .pain-card, .pref-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06);
+}
+.chart-card h3, .pain-card h3, .pref-card h3 {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 16px;
+}
+.chart-wrap { position: relative; max-width: 280px; margin: 0 auto; }
+
+/* 痛点列表 */
+.pain-list { list-style: none; }
+.pain-list li {
+  padding: 12px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+.pain-list li:last-child { border-bottom: none; }
+.pain-point-title { font-weight: 700; font-size: 14px; color: #1f2937; }
+.pain-evidence { font-size: 12px; color: #6b7280; margin-top: 4px; padding-left: 12px; border-left: 2px solid #E5E7EB; }
+
+/* 运营洞察卡片 */
+.insight-card {
+  background: #EEF2FF;
+  border: 1px solid #C7D2FE;
+  border-radius: 12px;
+  padding: 20px 24px;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+.insight-icon {
+  font-size: 28px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.insight-body h4 {
+  font-size: 14px;
+  font-weight: 700;
+  color: #3730A3;
+  margin-bottom: 4px;
+}
+.insight-body p {
+  font-size: 15px;
+  color: #3730A3;
+  line-height: 1.65;
+}
+
+/* 偏好标签 */
+.tag-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.tag {
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #4F46E5;
+  background: #EEF2FF;
+}
+
+/* 关键词标签（深色系） */
+.keyword-tag {
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: #1E1B4B;
+}
+
+/* 关键词卡片 */
+.keyword-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  margin-bottom: 20px;
+}
+.keyword-card h3 {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 16px;
+}
+
+/* 历史记录 */
+.history-section {
+  margin-top: 32px;
+  border-top: 1px solid #E5E7EB;
+  padding-top: 24px;
+}
+.history-section h2 {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.history-section h2 span { font-size: 14px; }
+.history-list { display: flex; flex-direction: column; gap: 12px; }
+.history-card {
+  background: #fff;
+  border-radius: 10px;
+  padding: 16px 20px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  position: relative;
+}
+.history-card .hc-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.history-card .hc-time { font-size: 12px; color: #9CA3AF; }
+.history-card .hc-platform {
+  font-size: 12px;
+  padding: 2px 10px;
+  border-radius: 12px;
+  background: #EEF2FF;
+  color: #4F46E5;
+  font-weight: 600;
+}
+.history-card .hc-metrics { font-size: 13px; color: #6b7280; margin-bottom: 6px; }
+.history-card .hc-metrics strong { color: #1f2937; }
+.history-card .hc-pain { font-size: 13px; color: #374151; }
+.history-card .hc-pain label { font-weight: 600; color: #1f2937; }
+.history-card .hc-delete {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  background: none;
+  border: none;
+  color: #9CA3AF;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.history-card .hc-delete:hover { color: #EF4444; background: #FEF2F2; }
+.btn-danger-text {
+  background: none;
+  border: none;
+  color: #EF4444;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.btn-danger-text:hover { background: #FEF2F2; }
+.history-empty { text-align: center; color: #9CA3AF; font-size: 14px; padding: 24px 0; }
+
+/* 导出按钮区 */
+.export-area { text-align: center; margin-top: 24px; }
+
+/* 错误提示 */
+.error-msg {
+  background: #FEF2F2;
+  border: 1px solid #FECACA;
+  color: #991B1B;
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  font-size: 14px;
+  display: none;
+}
+.error-msg.visible { display: block; }
+
+/* 加载动画 */
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255,255,255,.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin .6s linear infinite;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* 响应式 */
+@media (max-width: 768px) {
+  .metric-cards { grid-template-columns: repeat(2, 1fr); }
+  .analysis-grid { grid-template-columns: 1fr; }
+  .settings-bar { flex-direction: column; align-items: stretch; }
+  .settings-bar input[type="password"] { min-width: auto; }
+}
+@media (max-width: 480px) {
+  .metric-cards { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- 头部 -->
+  <div class="header">
+    <h1>社交媒体用户评论分析</h1>
+    <p>基于DeepSeek AI · 自动提炼用户痛点与需求洞察</p>
+  </div>
+
+  <!-- 设置栏 -->
+  <div class="settings-bar" id="settingsBar">
+    <label for="apiKeyInput">DeepSeek API Key</label>
+    <input type="password" id="apiKeyInput" placeholder="sk-xxxxxxxxxxxxxxxx">
+    <button class="btn btn-primary" id="btnSaveKey" onclick="saveApiKey()">保存</button>
+    <span class="status-tag" id="statusTag" style="display:none">已配置 ✓</span>
+  </div>
+
+  <!-- 错误提示 -->
+  <div class="error-msg" id="errorMsg"></div>
+
+  <!-- 输入区 -->
+  <div class="input-section">
+    <h2>输入分析内容</h2>
+
+    <div class="platform-group">
+      <label>选择平台</label>
+      <div class="radio-group">
+        <label><input type="radio" name="platform" value="小红书" checked><span>小红书</span></label>
+        <label><input type="radio" name="platform" value="抖音"><span>抖音</span></label>
+        <label><input type="radio" name="platform" value="其他"><span>其他</span></label>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label for="postContent">帖子正文</label>
+      <textarea id="postContent" placeholder="粘贴帖子正文内容"></textarea>
+    </div>
+
+    <div class="form-group">
+      <label for="commentsContent">用户评论</label>
+      <textarea id="commentsContent" placeholder="粘贴评论内容，每条评论换行分隔"></textarea>
+      <div class="hint">每条评论占一行，评论数越多分析越准确</div>
+    </div>
+
+    <button class="btn btn-primary btn-analyze" id="btnAnalyze" onclick="startAnalysis()">开始分析</button>
+  </div>
+
+  <!-- 结果区 -->
+  <div class="result-section" id="resultSection">
+    <!-- 运营洞察 -->
+    <div class="insight-card" id="insightCard">
+      <div class="insight-icon">💡</div>
+      <div class="insight-body">
+        <h4>运营洞察</h4>
+        <p id="insightText"></p>
+      </div>
+    </div>
+
+    <!-- 指标卡 -->
+    <div class="metric-cards">
+      <div class="metric-card">
+        <div class="number" id="metricComments">-</div>
+        <div class="label">评论总数</div>
+      </div>
+      <div class="metric-card">
+        <div class="number" id="metricPositive">-</div>
+        <div class="label">正面情感占比</div>
+      </div>
+      <div class="metric-card">
+        <div class="number" id="metricPain">-</div>
+        <div class="label">识别痛点数</div>
+      </div>
+      <div class="metric-card">
+        <div class="number" id="metricKeywords">-</div>
+        <div class="label">核心关键词数</div>
+      </div>
+    </div>
+
+    <!-- 图表 + 痛点 -->
+    <div class="analysis-grid">
+      <div class="chart-card">
+        <h3>情感分布</h3>
+        <div class="chart-wrap"><canvas id="sentimentChart"></canvas></div>
+      </div>
+      <div class="pain-card">
+        <h3>TOP5 用户痛点</h3>
+        <ol class="pain-list" id="painList"></ol>
+      </div>
+    </div>
+
+    <!-- 偏好标签 -->
+    <div class="pref-card">
+      <h3>用户偏好 / 需求标签</h3>
+      <div class="tag-list" id="prefTags"></div>
+    </div>
+
+    <!-- 核心关键词 -->
+    <div class="keyword-card">
+      <h3>核心关键词</h3>
+      <div class="tag-list" id="keywordTags"></div>
+    </div>
+
+    <!-- 导出 -->
+    <div class="export-area">
+      <button class="btn btn-success" onclick="exportExcel()" style="font-size:15px;padding:12px 32px;">导出 Excel 报告</button>
+    </div>
+  </div>
+
+  <!-- 历史记录 -->
+  <div class="history-section" id="historySection">
+    <h2>
+      分析历史
+      <button class="btn-danger-text" onclick="clearHistory()" id="btnClearHistory" style="display:none">清空全部</button>
+    </h2>
+    <div class="history-list" id="historyList">
+      <div class="history-empty">暂无历史记录</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ===== API Key 管理 =====
+const STORAGE_KEY = 'deepseek_api_key';
+
+function getApiKey() {
+  return localStorage.getItem(STORAGE_KEY) || '';
+}
+
+function saveApiKey() {
+  const input = document.getElementById('apiKeyInput');
+  const val = input.value.trim();
+  if (!val) {
+    showError('请输入有效的 API Key');
+    return;
+  }
+  localStorage.setItem(STORAGE_KEY, val);
+  input.value = '';
+  updateKeyStatus();
+  hideError();
+}
+
+function updateKeyStatus() {
+  const tag = document.getElementById('statusTag');
+  const hasKey = !!getApiKey();
+  tag.style.display = hasKey ? 'inline-block' : 'none';
+}
+
+// ===== 错误提示 =====
+function showError(msg) {
+  const el = document.getElementById('errorMsg');
+  el.textContent = msg;
+  el.classList.add('visible');
+}
+
+function hideError() {
+  document.getElementById('errorMsg').classList.remove('visible');
+}
+
+// ===== 解析评论列表 =====
+function parseComments(text) {
+  return text.split('\n')
+    .map(line => line.trim())
+    .filter(line => line.length > 0);
+}
+
+// ===== AI 分析 =====
+async function startAnalysis() {
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    showError('请先在顶部设置 DeepSeek API Key');
+    return;
+  }
+
+  const postContent = document.getElementById('postContent').value.trim();
+  const commentsRaw = document.getElementById('commentsContent').value.trim();
+  if (!commentsRaw) {
+    showError('请粘贴用户评论内容');
+    return;
+  }
+
+  const comments = parseComments(commentsRaw);
+  if (comments.length === 0) {
+    showError('未检测到有效评论，请检查输入格式');
+    return;
+  }
+
+  hideError();
+
+  // 获取平台
+  const platformRadio = document.querySelector('input[name="platform"]:checked');
+  const platform = platformRadio ? platformRadio.value : '小红书';
+
+  // 按钮加载态
+  const btn = document.getElementById('btnAnalyze');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>分析中...';
+
+  // 隐藏旧结果
+  document.getElementById('resultSection').classList.remove('visible');
+
+  try {
+    const result = await callDeepSeek(apiKey, platform, postContent, comments);
+    renderResult(result, comments.length, platform);
+  } catch (err) {
+    showError('分析失败：' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '开始分析';
+  }
+}
+
+async function callDeepSeek(apiKey, platform, postContent, comments) {
+  const commentsText = comments.join('\n');
+
+  const systemPrompt = '你是一名专业的用户运营分析师，擅长从社交媒体评论中提炼用户需求和痛点。请严格按照JSON格式返回分析结果，不要输出任何其他内容。除了JSON结构外，insight字段需要结合平台特性给出具体可落地的运营建议，例如：针对痛点设计活动、优化推送策略、调整用户标签等方向。';
+
+  const userPrompt = `请分析以下${platform}帖子的用户评论，返回如下JSON结构：
+{
+  "sentiment": {"positive": 数字, "negative": 数字, "neutral": 数字},
+  "pain_points": [{"point": "痛点描述", "evidence": ["原始评论1", "原始评论2"]}],
+  "preferences": ["偏好标签1", "偏好标签2"],
+  "keywords": ["关键词1", "关键词2"],
+  "insight": "针对本次分析的一句话运营建议，50字以内，直接给出可执行的运营动作"
+}
+
+帖子正文：${postContent || '（无正文）'}
+
+用户评论：${commentsText}`;
+
+  const resp = await fetch('https://api.deepseek.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: 'deepseek-chat',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      temperature: 0.3,
+      max_tokens: 4096
+    })
+  });
+
+  if (!resp.ok) {
+    const errBody = await resp.text();
+    let errMsg;
+    try {
+      const parsed = JSON.parse(errBody);
+      errMsg = parsed.error?.message || errBody;
+    } catch {
+      errMsg = errBody;
+    }
+    throw new Error(`API请求失败 (${resp.status})：${errMsg}`);
+  }
+
+  const data = await resp.json();
+  const content = data.choices?.[0]?.message?.content;
+
+  if (!content) {
+    throw new Error('API返回内容为空');
+  }
+
+  // 提取JSON（兼容markdown代码块包裹）
+  let jsonStr = content.trim();
+  const codeBlockMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (codeBlockMatch) {
+    jsonStr = codeBlockMatch[1].trim();
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(jsonStr);
+  } catch {
+    // 尝试修复常见的JSON问题（如单引号）
+    const fixed = jsonStr
+      .replace(/'/g, '"')
+      .replace(/None/g, 'null')
+      .replace(/True/g, 'true')
+      .replace(/False/g, 'false');
+    try {
+      parsed = JSON.parse(fixed);
+    } catch {
+      throw new Error('AI返回内容无法解析为JSON，请重试');
+    }
+  }
+
+  return parsed;
+}
+
+// ===== 渲染结果 =====
+let chartInstance = null;
+let lastAnalysisData = null;
+
+function renderResult(data, commentCount, platform) {
+  lastAnalysisData = { ...data, _commentCount: commentCount, _platform: platform };
+
+  const sent = data.sentiment || { positive: 0, negative: 0, neutral: 0 };
+  const total = sent.positive + sent.negative + sent.neutral || 1;
+  const posPct = Math.round((sent.positive / total) * 100);
+
+  const painPoints = data.pain_points || [];
+  const preferences = data.preferences || [];
+  const keywords = data.keywords || [];
+  const insight = data.insight || '暂无洞察建议';
+
+  // 运营洞察
+  document.getElementById('insightText').textContent = insight;
+
+  // 指标卡
+  document.getElementById('metricComments').textContent = commentCount;
+  document.getElementById('metricPositive').textContent = posPct + '%';
+  document.getElementById('metricPain').textContent = painPoints.length;
+  document.getElementById('metricKeywords').textContent = keywords.length;
+
+  // 饼图
+  renderChart(sent);
+
+  // 痛点列表（TOP5）
+  const painList = document.getElementById('painList');
+  painList.innerHTML = '';
+  const top5 = painPoints.slice(0, 5);
+  top5.forEach((pp, idx) => {
+    const li = document.createElement('li');
+    const evidenceHtml = (pp.evidence || []).slice(0, 2).map(e => `<div class="pain-evidence">"${escapeHtml(e)}"</div>`).join('');
+    li.innerHTML = `<div class="pain-point-title">${idx + 1}. ${escapeHtml(pp.point)}</div>${evidenceHtml}`;
+    painList.appendChild(li);
+  });
+
+  // 偏好标签
+  const prefTags = document.getElementById('prefTags');
+  prefTags.innerHTML = '';
+  preferences.forEach(p => {
+    const span = document.createElement('span');
+    span.className = 'tag';
+    span.textContent = p;
+    prefTags.appendChild(span);
+  });
+
+  // 核心关键词（深色标签）
+  const kwTags = document.getElementById('keywordTags');
+  kwTags.innerHTML = '';
+  keywords.forEach(kw => {
+    const span = document.createElement('span');
+    span.className = 'keyword-tag';
+    span.textContent = kw;
+    kwTags.appendChild(span);
+  });
+
+  // 保存到历史记录
+  saveToHistory(commentCount, posPct, painPoints, insight, platform);
+
+  // 显示结果区
+  document.getElementById('resultSection').classList.add('visible');
+  document.getElementById('resultSection').scrollIntoView({ behavior: 'smooth' });
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function renderChart(sent) {
+  if (chartInstance) {
+    chartInstance.destroy();
+  }
+  const ctx = document.getElementById('sentimentChart').getContext('2d');
+  chartInstance = new Chart(ctx, {
+    type: 'pie',
+    data: {
+      labels: ['正面', '负面', '中性'],
+      datasets: [{
+        data: [sent.positive || 0, sent.negative || 0, sent.neutral || 0],
+        backgroundColor: ['#22C55E', '#EF4444', '#9CA3AF'],
+        borderColor: '#fff',
+        borderWidth: 2
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: { padding: 20, font: { size: 13 } }
+        }
+      }
+    }
+  });
+}
+
+// ===== 历史记录管理 =====
+const HISTORY_KEY = 'analysis_history';
+const MAX_HISTORY = 5;
+
+function getHistory() {
+  try {
+    return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+  } catch { return []; }
+}
+
+function saveToHistory(commentCount, posPct, painPoints, insight, platform) {
+  const history = getHistory();
+  const top1Pain = painPoints.length > 0 ? painPoints[0].point : '无';
+  const now = new Date();
+  const timeStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+
+  history.unshift({
+    id: Date.now(),
+    time: timeStr,
+    platform: platform,
+    commentCount: commentCount,
+    posPct: posPct,
+    top1Pain: top1Pain,
+    insight: insight
+  });
+
+  if (history.length > MAX_HISTORY) {
+    history.length = MAX_HISTORY;
+  }
+
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+  renderHistory();
+}
+
+function deleteHistoryItem(id) {
+  let history = getHistory();
+  history = history.filter(h => h.id !== id);
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+  renderHistory();
+}
+
+function clearHistory() {
+  localStorage.removeItem(HISTORY_KEY);
+  renderHistory();
+}
+
+function renderHistory() {
+  const history = getHistory();
+  const list = document.getElementById('historyList');
+  const btnClear = document.getElementById('btnClearHistory');
+
+  btnClear.style.display = history.length > 0 ? 'inline-block' : 'none';
+
+  if (history.length === 0) {
+    list.innerHTML = '<div class="history-empty">暂无历史记录</div>';
+    return;
+  }
+
+  list.innerHTML = history.map(h => `
+    <div class="history-card">
+      <button class="hc-delete" onclick="deleteHistoryItem(${h.id})" title="删除此记录">&times;</button>
+      <div class="hc-header">
+        <span class="hc-time">${escapeHtml(h.time)}</span>
+        <span class="hc-platform">${escapeHtml(h.platform)}</span>
+      </div>
+      <div class="hc-metrics">
+        评论 <strong>${h.commentCount}</strong> 条 &nbsp;|&nbsp; 正面占比 <strong>${h.posPct}%</strong>
+      </div>
+      <div class="hc-pain"><label>TOP1痛点：</label>${escapeHtml(h.top1Pain)}</div>
+    </div>
+  `).join('');
+}
+
+// ===== Excel 导出 =====
+function exportExcel() {
+  if (!lastAnalysisData) return;
+
+  const sent = lastAnalysisData.sentiment || { positive: 0, negative: 0, neutral: 0 };
+  const total = sent.positive + sent.negative + sent.neutral || 1;
+  const painPoints = lastAnalysisData.pain_points || [];
+  const keywords = lastAnalysisData.keywords || [];
+  const insight = lastAnalysisData.insight || '';
+
+  // Sheet1: 情感分析
+  const sheet1Data = [
+    ['情感类别', '数量', '占比'],
+    ['正面', sent.positive || 0, Math.round((sent.positive / total) * 100) + '%'],
+    ['负面', sent.negative || 0, Math.round((sent.negative / total) * 100) + '%'],
+    ['中性', sent.neutral || 0, Math.round((sent.neutral / total) * 100) + '%'],
+    ['合计', total, '100%'],
+    [''],
+    ['运营洞察', insight]
+  ];
+
+  // Sheet2: 用户痛点
+  const sheet2Data = [['序号', '痛点描述', '佐证评论']];
+  painPoints.forEach((pp, idx) => {
+    const evidence = (pp.evidence || []).join('；');
+    sheet2Data.push([idx + 1, pp.point, evidence]);
+  });
+
+  // Sheet3: 关键词
+  const sheet3Data = [['序号', '关键词']];
+  keywords.forEach((kw, idx) => {
+    sheet3Data.push([idx + 1, kw]);
+  });
+
+  const wb = XLSX.utils.book_new();
+  const ws1 = XLSX.utils.aoa_to_sheet(sheet1Data);
+  ws1['!cols'] = [{ wch: 12 }, { wch: 8 }, { wch: 10 }];
+  XLSX.utils.book_append_sheet(wb, ws1, '情感分析');
+
+  const ws2 = XLSX.utils.aoa_to_sheet(sheet2Data);
+  ws2['!cols'] = [{ wch: 6 }, { wch: 30 }, { wch: 60 }];
+  XLSX.utils.book_append_sheet(wb, ws2, '用户痛点');
+
+  const ws3 = XLSX.utils.aoa_to_sheet(sheet3Data);
+  ws3['!cols'] = [{ wch: 6 }, { wch: 30 }];
+  XLSX.utils.book_append_sheet(wb, ws3, '关键词');
+
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+  XLSX.writeFile(wb, `分析报告_${dateStr}.xlsx`);
+}
+
+// ===== 初始化 =====
+function init() {
+  updateKeyStatus();
+  const hasKey = !!getApiKey();
+  document.getElementById('statusTag').style.display = hasKey ? 'inline-block' : 'none';
+  renderHistory();
+}
+
+init();
+</script>
+</body>
+</html>
