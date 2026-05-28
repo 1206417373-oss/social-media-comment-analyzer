@@ -894,6 +894,8 @@ async function startAnalysis() {
 
   try {
     const result = await callDeepSeek(apiKey, platform, postContent, comments);
+    result._rawComments = comments;
+    result._rawPostContent = postContent;
     renderResult(result, comments.length, platform);
   } catch (err) {
     showError('分析失败：' + err.message);
@@ -1321,6 +1323,9 @@ function exportExcel() {
 
   const sent = lastAnalysisData.sentiment || { positive: 0, negative: 0, neutral: 0 };
   const total = sent.positive + sent.negative + sent.neutral || 1;
+  const posPct = Math.round((sent.positive / total) * 100);
+  const negPct = Math.round((sent.negative / total) * 100);
+  const neuPct = Math.round((sent.neutral / total) * 100);
   const who = lastAnalysisData.who || {};
   const what = lastAnalysisData.what || {};
   const why = lastAnalysisData.why || {};
@@ -1328,87 +1333,161 @@ function exportExcel() {
   const soWhat = lastAnalysisData.so_what || {};
   const painPoints = why.pain_points || [];
   const keywords = what.keywords || [];
+  const topics = what.topics || [];
+  const hotQuestions = what.hot_questions || [];
+  const coreNeeds = why.core_needs || [];
+  const userTypes = who.user_type || [];
+  const rawComments = lastAnalysisData._rawComments || [];
+  const rawPostContent = lastAnalysisData._rawPostContent || '';
+  const commentCount = lastAnalysisData._commentCount || rawComments.length || 0;
+  const platform = lastAnalysisData._platform || '未知平台';
 
-  // Sheet1: 情感分析（保持不变）
-  const sheet1Data = [
-    ['情感类别', '数量', '占比'],
-    ['正面', sent.positive || 0, Math.round((sent.positive / total) * 100) + '%'],
-    ['负面', sent.negative || 0, Math.round((sent.negative / total) * 100) + '%'],
-    ['中性', sent.neutral || 0, Math.round((sent.neutral / total) * 100) + '%'],
-    ['合计', total, '100%']
-  ];
-
-  // Sheet2: 用户洞察
-  const sheet2Data = [
-    ['类别', '内容'],
-    ['WHO 用户标签', (who.user_type || []).join('、')],
-    ['WHO 用户特征', who['说明'] || ''],
-    ['WHAT 讨论主题', (what.topics || []).join('、')],
-    ['WHAT 高频问题', (what.hot_questions || []).join('、')],
-    ['WHY 核心需求', (why.core_needs || []).join('、')],
-    ['', ''],
-    ['痛点描述', '佐证评论']
-  ];
-  painPoints.forEach(pp => {
-    const evidence = (pp.evidence || []).join('；');
-    sheet2Data.push([pp.point, evidence]);
-  });
-
-  // Sheet3: 行为信号
-  const maxSigLen = Math.max(
-    (signals.purchase_intent || []).length,
-    (signals.compare_behavior || []).length,
-    (signals.churn_risk || []).length
-  );
-  const sheet3Data = [['购买意向', '比价行为', '流失风险']];
-  for (let i = 0; i < Math.max(maxSigLen, 1); i++) {
-    sheet3Data.push([
-      (signals.purchase_intent || [])[i] || '',
-      (signals.compare_behavior || [])[i] || '',
-      (signals.churn_risk || [])[i] || ''
-    ]);
-  }
-
-  // Sheet4: 运营建议
-  const sheet4Data = [
-    ['运营方向', '建议内容'],
-    ['活动策划', soWhat.activity || ''],
-    ['推送策略', soWhat.push_strategy || ''],
-    ['用户标签', soWhat.user_tag || ''],
-    ['内容选题', soWhat.content_topic || '']
-  ];
-
-  // Sheet5: 关键词
-  const sheet5Data = [['序号', '关键词']];
-  keywords.forEach((kw, idx) => {
-    sheet5Data.push([idx + 1, kw]);
-  });
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}`;
 
   const wb = XLSX.utils.book_new();
 
+  // ===== Sheet1: 分析概览 =====
+  const isPositive = posPct >= 50;
+  const overviewData = [
+    ['分析报告概览', ''],
+    ['', ''],
+    ['分析时间', dateStr],
+    ['分析平台', platform],
+    ['评论总数', commentCount + ' 条'],
+    ['', ''],
+    ['整体情感倾向', isPositive ? '正面（用户反馈积极）' : (negPct >= 50 ? '负面（需重点关注）' : '中性（评价均衡）')],
+    ['正面评论', sent.positive + ' 条（' + posPct + '%）'],
+    ['负面评论', sent.negative + ' 条（' + negPct + '%）'],
+    ['中性评论', sent.neutral + ' 条（' + neuPct + '%）'],
+    ['', ''],
+    ['核心结论', ''],
+    ['用户画像', userTypes.join('、') || '暂无'],
+    ['讨论主题', topics.join('、') || '暂无'],
+    ['核心需求', coreNeeds.join('、') || '暂无'],
+    ['痛点数量', painPoints.length + ' 个'],
+    ['购买意向信号', (signals.purchase_intent || []).length + ' 条'],
+    ['流失风险信号', (signals.churn_risk || []).length + ' 条'],
+    ['', ''],
+    ['运营策略建议', ''],
+    ['活动策划', soWhat.activity || ''],
+    ['推送策略', soWhat.push_strategy || ''],
+    ['用户分层标签', soWhat.user_tag || ''],
+    ['内容选题方向', soWhat.content_topic || ''],
+  ];
+  const ws0 = XLSX.utils.aoa_to_sheet(overviewData);
+  ws0['!cols'] = [{ wch: 18 }, { wch: 55 }];
+  XLSX.utils.book_append_sheet(wb, ws0, '分析概览');
+
+  // ===== Sheet2: 情感分析 =====
+  const sheet1Data = [
+    ['情感类别', '数量', '占比'],
+    ['正面', sent.positive || 0, posPct + '%'],
+    ['负面', sent.negative || 0, negPct + '%'],
+    ['中性', sent.neutral || 0, neuPct + '%'],
+    ['合计', total, '100%'],
+    ['', ''],
+    ['情感分布说明：正面评论占比' + posPct + '%，' + (posPct >= 50 ? '整体舆论向好。' : (posPct >= 30 ? '存在改进空间。' : '需重点关注负面反馈。'))]
+  ];
   const ws1 = XLSX.utils.aoa_to_sheet(sheet1Data);
-  ws1['!cols'] = [{ wch: 12 }, { wch: 8 }, { wch: 10 }];
+  ws1['!cols'] = [{ wch: 14 }, { wch: 8 }, { wch: 10 }];
   XLSX.utils.book_append_sheet(wb, ws1, '情感分析');
 
-  const ws2 = XLSX.utils.aoa_to_sheet(sheet2Data);
-  ws2['!cols'] = [{ wch: 18 }, { wch: 60 }];
-  XLSX.utils.book_append_sheet(wb, ws2, '用户洞察');
+  // ===== Sheet3: 用户画像 WHO =====
+  const whoData = [
+    ['维度', '内容', '说明'],
+    ['用户标签', userTypes.join('、'), '从评论行为推断的用户群体特征'],
+    ['用户特征描述', who['说明'] || '', '评论中体现的用户身份/状态'],
+  ];
+  const ws2 = XLSX.utils.aoa_to_sheet(whoData);
+  ws2['!cols'] = [{ wch: 16 }, { wch: 45 }, { wch: 30 }];
+  XLSX.utils.book_append_sheet(wb, ws2, '用户画像');
 
-  const ws3 = XLSX.utils.aoa_to_sheet(sheet3Data);
-  ws3['!cols'] = [{ wch: 40 }, { wch: 40 }, { wch: 40 }];
-  XLSX.utils.book_append_sheet(wb, ws3, '行为信号');
+  // ===== Sheet4: 内容分析 WHAT =====
+  const whatData = [
+    ['类别', '内容'],
+    ['讨论主题', topics.join('\n') || '暂无'],
+    ['', ''],
+    ['高频问题', hotQuestions.join('\n') || '暂无'],
+    ['', ''],
+    ['关键词', keywords.join('、') || '暂无'],
+  ];
+  const ws3 = XLSX.utils.aoa_to_sheet(whatData);
+  ws3['!cols'] = [{ wch: 14 }, { wch: 60 }];
+  XLSX.utils.book_append_sheet(wb, ws3, '内容分析');
 
-  const ws4 = XLSX.utils.aoa_to_sheet(sheet4Data);
-  ws4['!cols'] = [{ wch: 12 }, { wch: 50 }];
-  XLSX.utils.book_append_sheet(wb, ws4, '运营建议');
+  // ===== Sheet5: 需求分析 WHY =====
+  const whyData = [
+    ['维度', '内容'],
+    ['核心需求', coreNeeds.join('、') || '暂无'],
+    ['', ''],
+    ['', ''],
+    ['痛点描述', '佐证评论（原始用户评论）'],
+  ];
+  if (painPoints.length === 0) {
+    whyData.push(['暂无识别到的痛点', '']);
+  } else {
+    painPoints.forEach(pp => {
+      const point = pp.point || '';
+      const evidence = (pp.evidence || []).join('\n');
+      whyData.push([point, evidence]);
+    });
+  }
+  const ws4 = XLSX.utils.aoa_to_sheet(whyData);
+  ws4['!cols'] = [{ wch: 30 }, { wch: 55 }];
+  XLSX.utils.book_append_sheet(wb, ws4, '需求分析');
 
-  const ws5 = XLSX.utils.aoa_to_sheet(sheet5Data);
-  ws5['!cols'] = [{ wch: 6 }, { wch: 30 }];
-  XLSX.utils.book_append_sheet(wb, ws5, '关键词');
+  // ===== Sheet6: 行为信号 =====
+  const purchaseIntent = signals.purchase_intent || [];
+  const compareBehavior = signals.compare_behavior || [];
+  const churnRisk = signals.churn_risk || [];
+  const maxSigLen = Math.max(purchaseIntent.length, compareBehavior.length, churnRisk.length, 1);
+  const sigData = [
+    ['', ''],
+    ['购买意向（' + purchaseIntent.length + '条）', '比价行为（' + compareBehavior.length + '条）', '流失风险（' + churnRisk.length + '条）'],
+  ];
+  for (let i = 0; i < maxSigLen; i++) {
+    sigData.push([
+      purchaseIntent[i] || '',
+      compareBehavior[i] || '',
+      churnRisk[i] || ''
+    ]);
+  }
+  sigData.push(['', '', '']);
+  sigData.push(['分析说明：', '', '']);
+  sigData.push(['购买意向：用户有明确购买需求的评论', '', '']);
+  sigData.push(['比价行为：用户进行产品/价格比较的评论', '', '']);
+  sigData.push(['流失风险：用户表达不满或转向竞品的评论', '', '']);
+  const ws5 = XLSX.utils.aoa_to_sheet(sigData);
+  ws5['!cols'] = [{ wch: 40 }, { wch: 40 }, { wch: 40 }];
+  XLSX.utils.book_append_sheet(wb, ws5, '行为信号');
 
-  const now = new Date();
-  const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-  XLSX.writeFile(wb, `分析报告_${dateStr}.xlsx`);
+  // ===== Sheet7: 运营建议 SO WHAT =====
+  const soWhatData = [
+    ['运营方向', '具体建议', '落地思路'],
+    ['活动策划', soWhat.activity || '', '基于用户痛点设计针对性活动，提升转化'],
+    ['推送策略', soWhat.push_strategy || '', '精准触达目标用户，把握最佳推送时机'],
+    ['用户分层标签', soWhat.user_tag || '', '按用户特征和意向度分层，差异化运营'],
+    ['内容选题', soWhat.content_topic || '', '产出用户关注的内容，承接需求'],
+  ];
+  const ws6 = XLSX.utils.aoa_to_sheet(soWhatData);
+  ws6['!cols'] = [{ wch: 16 }, { wch: 45 }, { wch: 35 }];
+  XLSX.utils.book_append_sheet(wb, ws6, '运营建议');
+
+  // ===== Sheet8: 原始数据 =====
+  const rawData = [['帖子正文', rawPostContent], ['', ''], ['序号', '评论内容']];
+  if (rawComments.length === 0) {
+    rawData.push(['暂无原始评论数据', '']);
+  } else {
+    rawComments.forEach((c, i) => {
+      rawData.push([i + 1, typeof c === 'string' ? c : (c.content || JSON.stringify(c))]);
+    });
+  }
+  const ws7 = XLSX.utils.aoa_to_sheet(rawData);
+  ws7['!cols'] = [{ wch: 8 }, { wch: 80 }];
+  XLSX.utils.book_append_sheet(wb, ws7, '原始评论');
+
+  XLSX.writeFile(wb, `分析报告_${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}.xlsx`);
 }
 
 // ===== 初始化 =====
