@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>社交媒体用户评论分析工具</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -159,27 +158,49 @@ body {
 .metric-card .number { font-size: 32px; font-weight: 800; color: #4F46E5; }
 .metric-card .label { font-size: 13px; color: #6b7280; margin-top: 4px; }
 
-/* 图表+痛点布局 */
-.analysis-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
-  margin-bottom: 20px;
-}
-
-/* 图表卡片 */
-.chart-card, .pain-card, .pref-card {
+/* 饼图（纯CSS conic-gradient） */
+.pie-chart-card {
   background: #fff;
   border-radius: 12px;
   padding: 20px;
   box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  margin-bottom: 20px;
+  text-align: center;
 }
-.chart-card h3, .pain-card h3, .pref-card h3 {
+.pie-chart-card h3 {
   font-size: 16px;
   font-weight: 700;
   margin-bottom: 16px;
 }
-.chart-wrap { position: relative; max-width: 280px; margin: 0 auto; }
+.pie-circle {
+  width: 200px;
+  height: 200px;
+  border-radius: 50%;
+  margin: 0 auto 16px;
+}
+.pie-legend {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+.pie-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #374151;
+}
+.pie-legend-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.pie-legend-pct {
+  font-weight: 700;
+  color: #1f2937;
+}
 
 /* 痛点列表 */
 .pain-list { list-style: none; }
@@ -472,7 +493,6 @@ body {
 /* 响应式 */
 @media (max-width: 768px) {
   .metric-cards { grid-template-columns: repeat(2, 1fr); }
-  .analysis-grid { grid-template-columns: 1fr; }
   .settings-bar { flex-direction: column; align-items: stretch; }
   .settings-bar input[type="password"] { min-width: auto; }
 }
@@ -559,10 +579,15 @@ body {
       </div>
     </div>
 
-    <!-- 情感分布饼图 -->
-    <div class="chart-card" style="margin-bottom:20px;">
+    <!-- 情感分布饼图（纯CSS） -->
+    <div class="pie-chart-card">
       <h3>情感分布</h3>
-      <div class="chart-wrap"><canvas id="sentimentChart"></canvas></div>
+      <div class="pie-circle" id="pieCircle"></div>
+      <div class="pie-legend">
+        <div class="pie-legend-item"><span class="pie-legend-dot" style="background:#22C55E"></span> 正面 <span class="pie-legend-pct" id="piePosPct">0%</span></div>
+        <div class="pie-legend-item"><span class="pie-legend-dot" style="background:#EF4444"></span> 负面 <span class="pie-legend-pct" id="pieNegPct">0%</span></div>
+        <div class="pie-legend-item"><span class="pie-legend-dot" style="background:#9CA3AF"></span> 中性 <span class="pie-legend-pct" id="pieNeuPct">0%</span></div>
+      </div>
     </div>
 
     <!-- ① WHO 用户是谁 -->
@@ -890,11 +915,11 @@ function renderResult(data, commentCount, platform) {
   document.getElementById('metricPain').textContent = painPoints.length;
   document.getElementById('metricKeywords').textContent = keywords.length;
 
-  // 先显示结果区（确保canvas有尺寸，再初始化Chart.js）
+  // 先显示结果区
   document.getElementById('resultSection').classList.add('visible');
 
-  // 饼图（延迟初始化，确保canvas尺寸已就绪）
-  setTimeout(() => { renderChart(sent); }, 100);
+  // 饼图（纯CSS conic-gradient）
+  renderPieChart(sent);
 
   // ===== ① WHO =====
   const whoTypes = document.getElementById('whoUserTypes');
@@ -992,32 +1017,27 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-function renderChart(sent) {
-  if (window.sentimentChart instanceof Chart) {
-    window.sentimentChart.destroy();
-  }
-  const ctx = document.getElementById('sentimentChart').getContext('2d');
-  window.sentimentChart = new Chart(ctx, {
-    type: 'pie',
-    data: {
-      labels: ['正面', '负面', '中性'],
-      datasets: [{
-        data: [sent.positive || 0, sent.negative || 0, sent.neutral || 0],
-        backgroundColor: ['#22C55E', '#EF4444', '#9CA3AF'],
-        borderColor: '#fff',
-        borderWidth: 2
-      }]
-    },
-    options: {
-      responsive: true,
-      plugins: {
-        legend: {
-          position: 'bottom',
-          labels: { padding: 20, font: { size: 13 } }
-        }
-      }
-    }
-  });
+function renderPieChart(sent) {
+  const pos = sent.positive || 0;
+  const neg = sent.negative || 0;
+  const neu = sent.neutral || 0;
+  const total = pos + neg + neu || 1;
+
+  const posPct = Math.round((pos / total) * 100);
+  const negPct = Math.round((neg / total) * 100);
+  const neuPct = 100 - posPct - negPct;
+
+  // 计算conic-gradient各段：正面从0开始，负面紧随其后，中性填满剩余
+  const posEnd = posPct;
+  const negEnd = posEnd + negPct;
+
+  const pie = document.getElementById('pieCircle');
+  pie.style.background = `conic-gradient(#22C55E 0% ${posEnd}%, #EF4444 ${posEnd}% ${negEnd}%, #9CA3AF ${negEnd}% 100%)`;
+
+  // 更新图例百分比
+  document.getElementById('piePosPct').textContent = posPct + '%';
+  document.getElementById('pieNegPct').textContent = negPct + '%';
+  document.getElementById('pieNeuPct').textContent = neuPct + '%';
 }
 
 // ===== 历史记录管理 =====
