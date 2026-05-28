@@ -11,6 +11,7 @@ import re
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
@@ -35,12 +36,28 @@ SUPPORTED_PLATFORMS = {"xiaohongshu", "douyin", "weibo"}
 DEEPSEEK_ENDPOINT = "https://api.deepseek.com/v1/chat/completions"
 DEEPSEEK_MODEL = "deepseek-chat"
 
+# 内存变量：插件分析结果暂存
+_latest_result: dict | None = None
+
+# index.html 绝对路径
+INDEX_HTML_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "index.html")
+
 # ===== 数据模型 =====
 
 class AnalyzeRequest(BaseModel):
     url: str = Field(..., description="帖子URL")
     platform: str = Field(..., description="平台标识: xiaohongshu, douyin, weibo")
     deepseek_api_key: str = Field(..., description="用户的DeepSeek API Key")
+
+class AnalyzeDirectRequest(BaseModel):
+    platform: str = Field(..., description="平台标识: xiaohongshu, douyin, weibo")
+    post_content: str = Field(default="", description="帖子正文")
+    images: list[str] = Field(default=[], description="图片URL列表")
+    comments: list[str] = Field(default=[], description="评论列表")
+    deepseek_api_key: str = Field(..., description="用户的DeepSeek API Key")
+
+class StoreResultRequest(BaseModel):
+    result: dict = Field(..., description="完整的分析结果数据")
 
 class AnalyzeResponse(BaseModel):
     success: bool
@@ -111,6 +128,7 @@ async def _crawl_post(url: str, platform: str) -> dict:
         cookie = os.getenv("XHS_COOKIE", "")
         if not cookie:
             raise RuntimeError("请先在 .env 中配置 XHS_COOKIE")
+        print(f"[爬虫诊断] Cookie长度: {len(cookie)}, 前30字符: {cookie[:30]}")
         return await fetch_post(url, cookie)
 
     raise ValueError(f"平台 '{platform}' 的爬虫尚未实现")
@@ -182,6 +200,88 @@ async def _call_deepseek(api_key: str, platform_name: str, post_data: dict) -> d
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/debug/cookie")
+async def debug_cookie(platform: str = "xiaohongshu"):
+    """调试接口：查看Cookie是否正确加载。"""
+    if platform == "xiaohongshu":
+        cookie = os.getenv("XHS_COOKIE", "")
+    elif platform == "douyin":
+        cookie = os.getenv("DOUYIN_COOKIE", "")
+    elif platform == "weibo":
+        cookie = os.getenv("WEIBO_COOKIE", "")
+    else:
+        return {"error": f"未知平台: {platform}"}
+    return {
+        "platform": platform,
+        "cookie_length": len(cookie),
+        "cookie_start": cookie[:30] if cookie else "(空)",
+    }
+
+
+@app.get("/")
+async def serve_index():
+    """直接serve index.html，供插件打开使用。"""
+    if os.path.exists(INDEX_HTML_PATH):
+        return FileResponse(INDEX_HTML_PATH)
+    return {"error": "index.html not found"}
+
+
+@app.post("/store-result")
+async def store_result(req: StoreResultRequest):
+    """存储插件分析结果到内存。"""
+    global _latest_result
+    _latest_result = req.result
+    return {"success": True}
+
+
+@app.get("/latest-result")
+async def get_latest_result():
+    """返回最新的分析结果，返回后不清除（由 clear-result 清除）。"""
+    if _latest_result:
+        return {"success": True, "data": _latest_result}
+    return {"success": False, "data": None}
+
+
+@app.post("/clear-result")
+async def clear_result():
+    """清除已展示的分析结果。"""
+    global _latest_result
+    _latest_result = None
+    return {"success": True}
+
+
+@app.post("/analyze-direct")
+async def analyze_direct(req: AnalyzeDirectRequest):
+    """跳过爬虫，直接接收已抓取的数据进行AI分析。"""
+    try:
+        platform_name = _validate_platform(req.platform)
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
+    post_data = {
+        "post_content": req.post_content,
+        "images": req.images,
+        "comments": req.comments,
+        "comment_count": len(req.comments),
+    }
+
+    try:
+        analysis = await _call_deepseek(req.deepseek_api_key, platform_name, post_data)
+    except RuntimeError as e:
+        return {"success": False, "error": str(e)}
+
+    return {
+        "success": True,
+        "data": {
+            "post_content": req.post_content,
+            "images": req.images,
+            "comments": req.comments,
+            "comment_count": len(req.comments),
+            "analysis": analysis,
+        },
+    }
 
 
 @app.post("/analyze")

@@ -1420,26 +1420,29 @@ function init() {
 }
 
 async function checkChromeExtensionResult() {
-  try {
-    const resp = await fetch('http://localhost:8000/latest-result');
-    const body = await resp.json();
-    if (body.success && body.data) {
-      const d = body.data;
-      // 显示插件导入提示条
-      const banner = document.getElementById('pluginBanner');
-      if (banner) banner.style.display = 'block';
-      // 自动切换到URL分析标签页
-      switchTab('url');
-      // 渲染结果
-      const analysis = d.analysis || {};
-      analysis._rawComments = d.comments;
-      analysis._rawPostContent = d.post_content;
-      renderResult(analysis, d.comment_count || d.comments.length, '小红书');
-      // 清除后端已读结果
-      fetch('http://localhost:8000/clear-result', { method: 'POST' });
+  // 检查是否在Chrome插件环境中，且storage可用
+  if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+    try {
+      const stored = await chrome.storage.local.get(['latest_result']);
+      if (stored.latest_result && stored.latest_result.data) {
+        const result = stored.latest_result;
+        // 显示插件导入提示条
+        const banner = document.getElementById('pluginBanner');
+        if (banner) banner.style.display = 'block';
+        // 自动切换到URL分析标签页
+        switchTab('url');
+        // 渲染结果
+        const d = result.data;
+        const analysis = d.analysis || {};
+        analysis._rawComments = d.comments;
+        analysis._rawPostContent = d.post_content;
+        renderResult(analysis, d.comment_count || d.comments.length, '小红书');
+        // 清除已读结果
+        chrome.storage.local.remove(['latest_result']);
+      }
+    } catch (e) {
+      // 非插件环境或storage不可用，忽略
     }
-  } catch (e) {
-    // 后端未连接或暂无数据，忽略
   }
 }
 
