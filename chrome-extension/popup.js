@@ -91,15 +91,23 @@ analyzeBtn.addEventListener('click', async () => {
     // ===== Step 2: 加载评论 =====
     // 小红书用 API 翻页（绕过DOM滚动问题），抖音用滚动
     if (currentPlatform === 'xiaohongshu') {
-      setStatus('获取首屏评论...', '');
-      // 主动发起首屏请求
+      setStatus('检查已有评论...', '');
       const [firstRes] = await chrome.scripting.executeScript({
         target: { tabId: currentTabId },
         world: 'MAIN',
         func: fetchFirstCommentPage
       });
-      console.log('[popup] fetchFirstPage result:', firstRes?.result);
-      await sleep(2000);  // 等API响应+拦截器处理
+      console.log('[popup] fetchFirstPage result:', firstRes?.result, 'comments:', firstRes?.result);
+
+      if (!firstRes || !firstRes.result) {
+        setStatus('首屏评论获取失败，请重试', 'error');
+        analyzeBtn.disabled = false;
+        analyzeBtn.textContent = '开始分析';
+        return;
+      }
+
+      setStatus('开始翻页...', '');
+      await sleep(1000);
 
       let prevCount = 0;
       let staleCount = 0;
