@@ -71,7 +71,11 @@ analyzeBtn.addEventListener('click', async () => {
     // ===== Step 2: 滚动加载评论 =====
     setStatus('滚动加载评论...', '');
     let prevCount = 0;
-    for (let i = 0; i < 80; i++) {
+    let staleCount = 0;  // 连续无增长次数
+    const MAX_STALE = 3; // 连续3轮不增长才退出（30秒）
+    const MAX_ITER = 80;
+
+    for (let i = 0; i < MAX_ITER; i++) {
       await chrome.scripting.executeScript({
         target: { tabId: currentTabId },
         world: 'MAIN',
@@ -91,8 +95,15 @@ analyzeBtn.addEventListener('click', async () => {
         const totalStr = total > 0 ? ` / ${total}` : '';
         setStatus(`已收集 ${count}${totalStr} 条评论...`, '');
 
-        // 有数据且连续两轮不增长，提前退出
-        if (i > 20 && count > 0 && count === prevCount) break;
+        // 有数据后，连续3轮（30秒）不增长才提前退出
+        if (i > 20 && count > 0) {
+          if (count === prevCount) {
+            staleCount++;
+            if (staleCount >= MAX_STALE) break;
+          } else {
+            staleCount = 0;  // 有新数据，重置计数
+          }
+        }
         prevCount = count;
       }
     }
@@ -242,25 +253,31 @@ function injectInterceptor(platform) {
 }
 
 function scrollToLoadComments(platform) {
-  // 先滚窗口到底部
+  // 每隔几次滚动先回滚一点再往下，触发懒加载重新检测
+  const tick = (window.__scroll_tick__ || 0) + 1;
+  window.__scroll_tick__ = tick;
+
+  // 先滚页面到底
   window.scrollTo(0, document.body.scrollHeight);
 
-  if (platform === 'douyin') {
-    // 抖音评论区容器
-    const container = document.querySelector(
-      '.comment-mainContent, [class*="comment"][class*="list"], [class*="CommentListContainer"], [class*="comment-container"]'
-    );
-    if (container) {
-      container.scrollTop = container.scrollHeight;
+  // 评论区容器选择器
+  const selectors = platform === 'douyin'
+    ? ['.comment-mainContent', '[class*="comment"][class*="list"]', '[class*="CommentListContainer"]', '[class*="comment-container"]']
+    : ['.comment-container', '[class*="comment"][class*="container"]', '[class*="comments"]', '[class*="comment-wrapper"]', '[class*="note-comment"]'];
+
+  let container = null;
+  for (const sel of selectors) {
+    container = document.querySelector(sel);
+    if (container) break;
+  }
+
+  if (container) {
+    // 每5轮做一次"微回滚再滚到底"，强制触发懒加载检测
+    if (tick % 5 === 0) {
+      container.scrollTop = Math.max(0, container.scrollTop - 200);
     }
-  } else {
-    // 小红书评论区容器
-    const container = document.querySelector(
-      '.comment-container, [class*="comment"][class*="container"], [class*="comments"], [class*="comment-wrapper"], [class*="note-comment"]'
-    );
-    if (container) {
-      container.scrollTop = container.scrollHeight;
-    }
+    // 滚到底部
+    container.scrollTop = container.scrollHeight;
   }
 }
 
