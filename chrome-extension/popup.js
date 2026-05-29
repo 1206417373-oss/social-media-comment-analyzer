@@ -112,21 +112,19 @@ analyzeBtn.addEventListener('click', async () => {
       let prevCount = 0;
       let staleCount = 0;
       const MAX_STALE = 3;
-      const MAX_PAGES = 25;  // 最多翻25页（500条）
+      const MAX_PAGES = 30;
 
       for (let i = 0; i < MAX_PAGES; i++) {
-        // 调用主动翻页函数
-        const [fetchRes] = await chrome.scripting.executeScript({
+        // 滚动评论区，让页面自己翻页（生成正确签名）
+        const [scrollRes] = await chrome.scripting.executeScript({
           target: { tabId: currentTabId },
           world: 'MAIN',
           func: fetchNextCommentPage
         });
 
-        if (fetchRes.result === false) break;  // 没有更多页了
+        await sleep(2000);  // 等页面发API + 拦截器处理
 
-        await sleep(1500);  // 等API响应+拦截器处理
-
-        // 每2页检查一次进度
+        // 每2轮检查进度
         if (i % 2 === 0) {
           const [res] = await chrome.scripting.executeScript({
             target: { tabId: currentTabId },
@@ -138,6 +136,8 @@ analyzeBtn.addEventListener('click', async () => {
           const totalStr = total > 0 ? ` / ${total}` : '';
           setStatus(`已收集 ${count}${totalStr} 条评论...`, '');
 
+          console.log('[popup] 翻页进度:', count, '/', total, '页:', i);
+
           if (count > 0) {
             if (count === prevCount) {
               staleCount++;
@@ -146,6 +146,9 @@ analyzeBtn.addEventListener('click', async () => {
               staleCount = 0;
             }
             prevCount = count;
+          } else {
+            staleCount++;
+            if (staleCount >= 5) break;  // 一直没评论多等几轮
           }
         }
       }
@@ -458,115 +461,60 @@ function resetCommentState(platform) {
   window.__scroll_tick__ = 0;
 }
 
-// 小红书专用：触发页面自然加载评论，捕获XHS专用请求头
-// XHS API 需要 X-S/X-T 等签名头，只有页面自己发的请求才有
-// 我们的策略：滚动评论区 → 页面自然请求API → 拦截器捕获headers → 用这些headers翻页
+// 小红书专用：滚动评论区 + 等待拦截器捕获首屏评论
 async function fetchFirstCommentPage() {
-  console.log('[fetchFirstPage] ====== 开始执行 ======');
-
-  // 初始化存储
   if (!window.__xhs_comments__) window.__xhs_comments__ = [];
   if (!window.__xhs_seen__) window.__xhs_seen__ = new Set();
-  if (!window.__xhs_total__) window.__xhs_total__ = 0;
 
-  // 策略：触发页面自己的评论加载（通过滚动评论区），让拦截器捕获请求头
-  // 先尝试滚动各种可能的评论区容器
-  const scrollContainers = document.querySelectorAll('[class*="comment"], [class*="note-scroll"], [class*="detail"]');
-  console.log('[fetchFirstPage] 找到', scrollContainers.length, '个可能的滚动容器');
-  for (const el of scrollContainers) {
-    if (el.scrollHeight > el.clientHeight) {
-      el.scrollTop = el.scrollHeight;
-      console.log('[fetchFirstPage] 滚动容器:', el.className, 'scrollHeight:', el.scrollHeight);
-    }
-  }
-
-  // 等待拦截器捕获页面API调用
-  // 如果已有评论说明拦截器已工作，直接成功
+  // 如果拦截器已有评论，直接成功
   if (window.__xhs_comments__.length > 0) {
-    console.log('[fetchFirstPage] 已有', window.__xhs_comments__.length, '条评论，cursor:', window.__xhs_api_info__?.lastCursor);
+    console.log('[fetchFirstPage] 已有', window.__xhs_comments__.length, '条评论');
     return true;
   }
 
-  console.log('[fetchFirstPage] 等待页面自然加载评论...');
+  // 滚动评论区触发首次加载
+  const containers = document.querySelectorAll('[class*="comment"], [class*="note-scroll"]');
+  for (const el of containers) {
+    if (el.scrollHeight > el.clientHeight) el.scrollTop = el.scrollHeight;
+  }
+
+  // 最多等10秒
   for (let i = 0; i < 10; i++) {
     await new Promise(r => setTimeout(r, 1000));
     if (window.__xhs_comments__.length > 0) {
-      console.log('[fetchFirstPage] 拦截器已收集', window.__xhs_comments__.length, '条评论');
+      console.log('[fetchFirstPage] 收集到', window.__xhs_comments__.length, '条评论');
       return true;
     }
-    // 继续滚动触发加载
-    for (const el of scrollContainers) {
-      if (el.scrollHeight > el.clientHeight) {
-        el.scrollTop = el.scrollHeight;
-      }
-    }
-    console.log('[fetchFirstPage] 等待中...', i + 1, '秒');
   }
-
-  console.warn('[fetchFirstPage] 超时，comments:', window.__xhs_comments__.length);
-  return window.__xhs_comments__.length > 0;
+  console.warn('[fetchFirstPage] 超时');
+  return false;
 }
 
 // 小红书专用：主动调用API翻页
-// 用拦截器捕获的XHS请求头翻页（这些头是页面自己发请求时留下的）
+// 通过滚动评论区触发页面自然翻页（让XHS自己生成签名）
+// 不能自己调API：X-s/X-t签名每次请求独立计算，复用旧签名会失败
 async function fetchNextCommentPage() {
-  const info = window.__xhs_api_info__;
-  if (!info || !info.lastCursor) { console.log('[fetchNextPage] 无cursor, 停止翻页'); return false; }
-
-  const m = window.location.href.match(/\/explore\/([a-f0-9]{24})/);
-  if (!m) return false;
-  const noteId = m[1];
-
-  // 复用页面原API的所有查询参数，只更新cursor
-  const baseParams = info.allParams || {};
-  const params = { ...baseParams, cursor: info.lastCursor };
-  const apiUrl = (info.url || 'https://www.xiaohongshu.com/api/sns/web/v2/comment/page') +
-    '?' + new URLSearchParams(params).toString();
-
-  // 使用拦截器捕获的headers（包含X-S等XHS签名头）
-  const headers = info.headers || {};
-  console.log('[fetchNextPage] 翻页 cursor:', info.lastCursor, 'params:', Object.keys(params));
-
-  try {
-    const resp = await fetch(apiUrl, { headers });
-    console.log('[fetchNextPage] resp status:', resp.status);
-    if (resp.status !== 200) {
-      console.error('[fetchNextPage] 状态码异常:', resp.status, await resp.text().catch(() => ''));
-      return false;
+  // 滚动评论区容器触发页面加载下一页
+  const containers = document.querySelectorAll('[class*="comment"]');
+  let scrolled = false;
+  for (const el of containers) {
+    if (el.scrollHeight > el.clientHeight + 10) {
+      // 向上滚一点再向下滚到底，强制触发懒加载
+      el.scrollTop = Math.max(0, el.scrollTop - 300);
+      el.scrollTop = el.scrollHeight;
+      scrolled = true;
     }
-    const json = await resp.json();
-    const data = json?.data || json;
-    const comments = data?.comments || [];
-
-    let added = 0;
-    comments.forEach(c => {
-      if (c.content) {
-        const t = c.content.trim();
-        if (!window.__xhs_seen__.has(t)) {
-          window.__xhs_seen__.add(t);
-          window.__xhs_comments__.push(t);
-          added++;
-        }
-      }
-      (c.sub_comments || c.sub_comment_list || []).forEach(s => {
-        if (s.content) {
-          const t = s.content.trim();
-          if (!window.__xhs_seen__.has(t)) {
-            window.__xhs_seen__.add(t);
-            window.__xhs_comments__.push(t);
-            added++;
-          }
-        }
-      });
-    });
-
-    info.lastCursor = data.cursor || '';
-    console.log('[fetchNextPage] 新增:', added, '总数:', window.__xhs_comments__.length, 'cursor:', data.cursor);
-    return !!data.cursor;
-  } catch (e) {
-    console.error('[fetchNextPage] fetch失败:', e);
-    return false;
   }
+  // 也尝试滚整个页面
+  const noteScroller = document.querySelector('[class*="note-scroller"], [class*="detail"]');
+  if (noteScroller && noteScroller.scrollHeight > noteScroller.clientHeight + 10) {
+    noteScroller.scrollTop = Math.max(0, noteScroller.scrollTop - 300);
+    noteScroller.scrollTop = noteScroller.scrollHeight;
+    scrolled = true;
+  }
+
+  // 返回滚动前已有评论数，由popup判断是否有增长
+  return { scrolled, prevCount: window.__xhs_comments__.length };
 }
 
 function scrollToLoadComments(platform) {
