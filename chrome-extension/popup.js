@@ -79,9 +79,14 @@ analyzeBtn.addEventListener('click', async () => {
     // ===== Step 2: 加载评论 =====
     // 小红书用 API 翻页（绕过DOM滚动问题），抖音用滚动
     if (currentPlatform === 'xiaohongshu') {
-      setStatus('等待首页评论加载...', '');
-      // 先等页面自己加载首屏评论（等拦截器捕获API信息）
-      await sleep(3000);
+      setStatus('获取首屏评论...', '');
+      // 主动发起首屏请求，不依赖页面自然加载时机
+      await chrome.scripting.executeScript({
+        target: { tabId: currentTabId },
+        world: 'MAIN',
+        func: fetchFirstCommentPage
+      });
+      await sleep(2000);  // 等API响应+拦截器处理
 
       let prevCount = 0;
       let staleCount = 0;
@@ -332,29 +337,37 @@ function injectInterceptor(platform) {
     return _send.apply(this, a);
   };
 
-  // 小红书：暴露主动翻页函数，绕过DOM滚动
+  // 小红书：暴露主动翻页函数，不依赖页面自然加载时机
   if (platform === 'xiaohongshu') {
+    const noteIdMatch = window.location.href.match(/\/explore\/([a-f0-9]{24})/);
+    const noteId = noteIdMatch ? noteIdMatch[1] : '';
+
+    // 主动发起首屏评论请求（解决拦截器注入晚于首屏API的问题）
+    window.__xhs_fetchFirstPage__ = async function () {
+      if (!noteId) return false;
+      const apiUrl = 'https://www.xiaohongshu.com/api/sns/web/v2/comment/page?' +
+        new URLSearchParams({
+          note_id: noteId, cursor: '', top_comment_id: '', image_scenes: '',
+        }).toString();
+      try {
+        await window.fetch(apiUrl, { method: 'GET', headers: { 'Accept': 'application/json' } });
+        return true;
+      } catch (e) { return false; }
+    };
+
     window.__xhs_fetchNextPage__ = async function () {
       const info = window.__xhs_api_info__;
       if (!info || !info.lastCursor) return false;
-
       const nextUrl = info.url + '?' + new URLSearchParams({
-        note_id: new URL(info.url, window.location.origin).searchParams.get('note_id') || '',
-        cursor: info.lastCursor,
-        top_comment_id: '',
-        image_scenes: '',
+        note_id: noteId, cursor: info.lastCursor,
+        top_comment_id: '', image_scenes: '',
       }).toString();
-
       try {
         await window.fetch(nextUrl, {
-          method: info.method,
-          headers: info.headers,
-          body: info.body,
+          method: info.method, headers: info.headers, body: info.body,
         });
         return true;
-      } catch (e) {
-        return false;
-      }
+      } catch (e) { return false; }
     };
   }
 }
@@ -373,7 +386,15 @@ function resetCommentState(platform) {
   window.__scroll_tick__ = 0;
 }
 
-// 小红书专用：主动调用API翻页（不依赖DOM滚动）
+// 小红书专用：主动发起首屏评论请求
+function fetchFirstCommentPage() {
+  if (window.__xhs_fetchFirstPage__) {
+    return window.__xhs_fetchFirstPage__();
+  }
+  return false;
+}
+
+// 小红书专用：主动调用API翻页
 function fetchNextCommentPage() {
   if (window.__xhs_fetchNextPage__) {
     return window.__xhs_fetchNextPage__();
