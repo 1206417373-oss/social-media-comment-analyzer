@@ -48,40 +48,44 @@
 
   function getPlatformName() { return isDY ? '抖音' : '小红书'; }
 
-  // ===== 拦截 fetch（用defineProperty防止被页面覆盖） =====
+  // ===== 拦截 fetch =====
   var _fetch = window.fetch;
-  var wrappedFetch = function () {
-    var args = arguments;
-    var input = args[0];
-    var url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
+  function makeWrapper() {
+    return function () {
+      var args = arguments;
+      var input = args[0];
+      var url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
 
-    return _fetch.apply(this, args).then(function(r) {
-      if (isCommentApi(url)) {
-        r.clone().json().then(function(d) {
-          var data = d && d.data ? d.data : d;
-          window[totalKey] = data.total_comment_count || data.total_count || window[totalKey];
-          collect(data.comments);
-          console.log('[自启拦截器-' + getPlatformName() + '] 收集:', window[commentsKey].length, '/', window[totalKey]);
-        }).catch(function() {});
-      } else if (url.includes('/aweme/')) {
-        console.log('[DY诊断] 非评论API:', url.substring(0, 120));
-      }
-      return r;
-    });
-  };
-
-  // 锁死fetch：页面替换时更新_fetch引用，但getter始终返回我们的wrapper
-  try {
-    Object.defineProperty(window, 'fetch', {
-      get: function() { return wrappedFetch; },
-      set: function(v) { _fetch = v; },
-      configurable: true, enumerable: true
-    });
-  } catch(e) {
-    // defineProperty不可用时降级
-    window.fetch = wrappedFetch;
-    console.log('[自启拦截器] defineProperty失败，降级为直接赋值');
+      return _fetch.apply(this, args).then(function(r) {
+        if (isCommentApi(url)) {
+          r.clone().json().then(function(d) {
+            var data = d && d.data ? d.data : d;
+            window[totalKey] = data.total_comment_count || data.total_count || window[totalKey];
+            collect(data.comments);
+            console.log('[自启拦截器-' + getPlatformName() + '] 收集:', window[commentsKey].length, '/', window[totalKey]);
+          }).catch(function() {});
+        } else if (isDY && url.includes('/aweme/')) {
+          console.log('[DY诊断] 非评论API:', url.substring(0, 120));
+        }
+        return r;
+      });
+    };
   }
+  window.fetch = makeWrapper();
+
+  // 防覆盖：每2秒检查fetch是否被页面替换，被替换就重新包装
+  var checkCount = 0;
+  var checkTimer = setInterval(function() {
+    if (checkCount++ > 60) { clearInterval(checkTimer); return; } // 2分钟后停止
+    if (window.fetch !== window.__our_fetch_ref__) {
+      console.log('[自启拦截器] fetch被覆盖，重新包装 (第' + checkCount + '次检查)');
+      _fetch = window.fetch;  // 捕获新引用
+      var w = makeWrapper();
+      window.fetch = w;
+      window.__our_fetch_ref__ = w;
+    }
+  }, 2000);
+  window.__our_fetch_ref__ = window.fetch;
 
   // ===== 拦截 XHR =====
   var X = XMLHttpRequest.prototype;
