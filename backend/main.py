@@ -45,11 +45,6 @@ INDEX_HTML_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(_
 
 # ===== 数据模型 =====
 
-class AnalyzeRequest(BaseModel):
-    url: str = Field(..., description="帖子URL")
-    platform: str = Field(..., description="平台标识: xiaohongshu, douyin, weibo")
-    deepseek_api_key: str = Field(..., description="用户的DeepSeek API Key")
-
 class AnalyzeDirectRequest(BaseModel):
     platform: str = Field(..., description="平台标识: xiaohongshu, douyin, weibo")
     post_content: str = Field(default="", description="帖子正文")
@@ -120,27 +115,6 @@ def _validate_platform(platform: str):
     if platform not in SUPPORTED_PLATFORMS:
         raise ValueError("不支持的平台或URL格式")
     return platform_map[platform]
-
-
-async def _crawl_post(url: str, platform: str) -> dict:
-    """根据平台调用对应爬虫获取数据。"""
-    if platform == "xiaohongshu":
-        from crawlers.xiaohongshu import fetch_post
-        cookie = os.getenv("XHS_COOKIE", "")
-        if not cookie:
-            raise RuntimeError("请先在 .env 中配置 XHS_COOKIE")
-        print(f"[爬虫诊断] Cookie长度: {len(cookie)}, 前30字符: {cookie[:30]}")
-        return await fetch_post(url, cookie)
-
-    elif platform == "douyin":
-        from crawlers.douyin import fetch_post
-        cookie = os.getenv("DOUYIN_COOKIE", "")
-        if not cookie:
-            raise RuntimeError("请先在 .env 中配置 DOUYIN_COOKIE")
-        print(f"[爬虫诊断] Cookie长度: {len(cookie)}, 前30字符: {cookie[:30]}")
-        return await fetch_post(url, cookie)
-
-    raise ValueError(f"平台 '{platform}' 的爬虫尚未实现")
 
 
 async def _call_deepseek(api_key: str, platform_name: str, post_data: dict) -> dict:
@@ -293,37 +267,4 @@ async def analyze_direct(req: AnalyzeDirectRequest):
         },
     }
 
-
-@app.post("/analyze")
-async def analyze(req: AnalyzeRequest):
-    try:
-        platform_name = _validate_platform(req.platform)
-    except ValueError as e:
-        return {"success": False, "error": str(e)}
-
-    # 1. 爬取帖子数据
-    try:
-        post_data = await _crawl_post(req.url, req.platform)
-    except ValueError as e:
-        return {"success": False, "error": str(e)}
-    except RuntimeError as e:
-        return {"success": False, "error": str(e)}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-    # 2. 调用DeepSeek分析
-    try:
-        analysis = await _call_deepseek(req.deepseek_api_key, platform_name, post_data)
-    except RuntimeError as e:
-        return {"success": False, "error": str(e)}
-
-    return {
-        "success": True,
-        "data": {
-            "post_content": post_data["post_content"],
-            "images": post_data.get("images", []),
-            "comments": post_data.get("comments", []),
-            "comment_count": post_data.get("comment_count", len(post_data.get("comments", []))),
-            "analysis": analysis,
-        },
-    }
+# /analyze（URL爬取分析）已移除，只保留 /analyze-direct（直接分析）和 Chrome 插件流程

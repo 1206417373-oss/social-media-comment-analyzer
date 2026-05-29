@@ -96,63 +96,7 @@ body {
   display: inline-block;
 }
 
-/* 模式切换标签 */
-.tab-switch {
-  display: flex;
-  gap: 0;
-  margin-bottom: 20px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  overflow: hidden;
-}
-.tab-btn {
-  flex: 1;
-  padding: 10px 16px;
-  border: none;
-  background: #fff;
-  font-size: 14px;
-  font-weight: 600;
-  color: #6b7280;
-  cursor: pointer;
-  transition: all .2s;
-}
-.tab-btn.active {
-  background: #4F46E5;
-  color: #fff;
-}
-.tab-btn:not(.active):hover { background: #f3f4f6; }
-.tab-content { display: none; }
-.tab-content.active { display: block; }
-
-.url-input-row {
-  display: flex;
-  gap: 10px;
-  align-items: flex-end;
-  flex-wrap: wrap;
-}
-.url-input-row input[type="text"] {
-  flex: 1;
-  min-width: 260px;
-  padding: 10px 14px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  font-size: 14px;
-  outline: none;
-  transition: border-color .2s;
-}
-.url-input-row input[type="text"]:focus { border-color: #4F46E5; }
-.url-platform-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 14px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  color: #4F46E5;
-  background: #EEF2FF;
-  white-space: nowrap;
-}
+/* 平台选择 */
 .platform-group { margin-bottom: 16px; }
 .platform-group label { font-weight: 600; font-size: 14px; display: block; margin-bottom: 8px; }
 .radio-group { display: flex; gap: 16px; flex-wrap: wrap; }
@@ -586,48 +530,28 @@ body {
   <div class="input-section">
     <h2>输入分析内容</h2>
 
-    <!-- 模式切换 -->
-    <div class="tab-switch">
-      <button class="tab-btn active" id="tabText" onclick="switchTab('text')">文本粘贴</button>
-      <button class="tab-btn" id="tabUrl" onclick="switchTab('url')">URL 分析</button>
+    <div id="pluginBanner" style="display:none; background:#EEF2FF; border:1px solid #C7D2FE; border-radius:8px; padding:10px 14px; margin-bottom:12px; font-size:13px; color:#4338CA;">
+      已从插件导入数据，分析结果如下
     </div>
 
-    <!-- 模式1: 文本粘贴 -->
-    <div class="tab-content active" id="contentText">
-      <div class="platform-group">
-        <label>选择平台</label>
-        <div class="radio-group">
-          <label><input type="radio" name="platform" value="小红书" checked><span>小红书</span></label>
-          <label><input type="radio" name="platform" value="抖音"><span>抖音</span></label>
-          <label><input type="radio" name="platform" value="其他"><span>其他</span></label>
-        </div>
-      </div>
-
-      <div class="form-group">
-        <label for="postContent">帖子正文</label>
-        <textarea id="postContent" placeholder="粘贴帖子正文内容"></textarea>
-      </div>
-
-      <div class="form-group">
-        <label for="commentsContent">用户评论</label>
-        <textarea id="commentsContent" placeholder="粘贴评论内容，每条评论换行分隔"></textarea>
-        <div class="hint">每条评论占一行，评论数越多分析越准确</div>
+    <div class="platform-group">
+      <label>选择平台</label>
+      <div class="radio-group">
+        <label><input type="radio" name="platform" value="小红书" checked><span>小红书</span></label>
+        <label><input type="radio" name="platform" value="抖音"><span>抖音</span></label>
+        <label><input type="radio" name="platform" value="其他"><span>其他</span></label>
       </div>
     </div>
 
-    <!-- 模式2: URL分析 -->
-    <div class="tab-content" id="contentUrl">
-      <div id="pluginBanner" style="display:none; background:#EEF2FF; border:1px solid #C7D2FE; border-radius:8px; padding:10px 14px; margin-bottom:12px; font-size:13px; color:#4338CA;">
-        已从插件导入数据，分析结果如下
-      </div>
-      <div class="form-group">
-        <label for="postUrl">帖子URL</label>
-        <div class="url-input-row">
-          <input type="text" id="postUrl" placeholder="粘贴小红书/抖音帖子链接" oninput="autoDetectPlatform()">
-          <span class="url-platform-badge" id="urlPlatformBadge">未识别</span>
-        </div>
-        <div class="hint">支持小红书链接、抖音链接和 xhslink.com 短链</div>
-      </div>
+    <div class="form-group">
+      <label for="postContent">帖子正文</label>
+      <textarea id="postContent" placeholder="粘贴帖子正文内容"></textarea>
+    </div>
+
+    <div class="form-group">
+      <label for="commentsContent">用户评论</label>
+      <textarea id="commentsContent" placeholder="粘贴评论内容，每条评论换行分隔"></textarea>
+      <div class="hint">每条评论占一行，评论数越多分析越准确</div>
     </div>
 
     <button class="btn btn-primary btn-analyze" id="btnAnalyze" onclick="startAnalysis()">开始分析</button>
@@ -823,38 +747,6 @@ function parseComments(text) {
 }
 
 // ===== AI 分析 =====
-let activeTab = 'text';
-
-function switchTab(tab) {
-  activeTab = tab;
-  document.getElementById('tabText').classList.toggle('active', tab === 'text');
-  document.getElementById('tabUrl').classList.toggle('active', tab === 'url');
-  document.getElementById('contentText').classList.toggle('active', tab === 'text');
-  document.getElementById('contentUrl').classList.toggle('active', tab === 'url');
-  hideError();
-}
-
-function autoDetectPlatform() {
-  const url = document.getElementById('postUrl').value.trim().toLowerCase();
-  const badge = document.getElementById('urlPlatformBadge');
-  if (url.includes('xiaohongshu.com') || url.includes('xhslink.com')) {
-    badge.textContent = '小红书';
-    badge.style.color = '#4F46E5';
-    badge.style.background = '#EEF2FF';
-  } else if (url.includes('douyin.com') || url.includes('tiktok.com')) {
-    badge.textContent = '抖音';
-    badge.style.color = '#4F46E5';
-    badge.style.background = '#EEF2FF';
-  } else if (url.includes('weibo.com')) {
-    badge.textContent = '微博';
-    badge.style.color = '#4F46E5';
-    badge.style.background = '#EEF2FF';
-  } else {
-    badge.textContent = '未识别';
-    badge.style.color = '#9CA3AF';
-    badge.style.background = '#F3F4F6';
-  }
-}
 
 async function startAnalysis() {
   const apiKey = getApiKey();
@@ -863,11 +755,6 @@ async function startAnalysis() {
     return;
   }
 
-  if (activeTab === 'url') {
-    return analyzeUrl(apiKey);
-  }
-
-  // 文本粘贴模式
   const postContent = document.getElementById('postContent').value.trim();
   const commentsRaw = document.getElementById('commentsContent').value.trim();
   if (!commentsRaw) {
@@ -899,70 +786,6 @@ async function startAnalysis() {
     renderResult(result, comments.length, platform);
   } catch (err) {
     showError('分析失败：' + err.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '开始分析';
-  }
-}
-
-async function analyzeUrl(apiKey) {
-  const url = document.getElementById('postUrl').value.trim();
-  if (!url) {
-    showError('请输入帖子URL');
-    return;
-  }
-
-  const badge = document.getElementById('urlPlatformBadge');
-  let platform = 'xiaohongshu';
-  const urlLower = url.toLowerCase();
-  if (urlLower.includes('xiaohongshu.com') || urlLower.includes('xhslink.com')) {
-    platform = 'xiaohongshu';
-  } else if (urlLower.includes('douyin.com')) {
-    platform = 'douyin';
-  } else if (urlLower.includes('weibo.com')) {
-    platform = 'weibo';
-  } else {
-    showError('不支持的URL格式，请检查链接');
-    return;
-  }
-
-  hideError();
-
-  const btn = document.getElementById('btnAnalyze');
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span>分析中...';
-
-  document.getElementById('resultSection').classList.remove('visible');
-
-  try {
-    const resp = await fetch('http://localhost:8000/analyze', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        url: url,
-        platform: platform,
-        deepseek_api_key: apiKey
-      })
-    });
-
-    const body = await resp.json();
-
-    if (!body.success) {
-      throw new Error(body.error || '未知错误');
-    }
-
-    const d = body.data;
-    // 将后端返回数据映射到前端 renderResult 期望的结构
-    const analysis = d.analysis || {};
-    analysis._rawComments = d.comments;
-    analysis._rawPostContent = d.post_content;
-
-    renderResult(analysis, d.comment_count || d.comments.length,
-      platform === 'xiaohongshu' ? '小红书' :
-      platform === 'douyin' ? '抖音' : '微博');
-
-  } catch (err) {
-    showError('URL分析失败：' + err.message);
   } finally {
     btn.disabled = false;
     btn.textContent = '开始分析';
@@ -1507,8 +1330,6 @@ async function checkChromeExtensionResult() {
       // 显示插件导入提示条
       const banner = document.getElementById('pluginBanner');
       if (banner) banner.style.display = 'block';
-      // 自动切换到URL分析标签页
-      switchTab('url');
       // 渲染结果
       const analysis = d.analysis || {};
       analysis._rawComments = d.comments;
