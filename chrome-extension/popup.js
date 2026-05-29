@@ -147,23 +147,22 @@ analyzeBtn.addEventListener('click', async () => {
         }
       }
     } else {
-      // 抖音：滚动加载
+      // 抖音：与小红书用同一套翻页逻辑（全页面滚动触发懒加载）
       setStatus('滚动加载评论...', '');
-      let prevCount = 0;
-      let staleCount = 0;
-      const MAX_STALE = 3;
-      const MAX_ITER = 80;
+      let prevCountDy = 0;
+      let staleCountDy = 0;
+      const MAX_STALE_DY = 5;
+      const MAX_PAGES_DY = 150;
 
-      for (let i = 0; i < MAX_ITER; i++) {
+      for (let i = 0; i < MAX_PAGES_DY; i++) {
         await chrome.scripting.executeScript({
           target: { tabId: currentTabId },
           world: 'MAIN',
-          func: scrollToLoadComments,
-          args: [currentPlatform]
+          func: fetchNextCommentPage
         });
-        await sleep(1000);
+        await sleep(1500);
 
-        if (i % 10 === 0) {
+        if (i % 2 === 0) {
           const [res] = await chrome.scripting.executeScript({
             target: { tabId: currentTabId },
             world: 'MAIN',
@@ -171,18 +170,17 @@ analyzeBtn.addEventListener('click', async () => {
             args: [currentPlatform]
           });
           const { count, total } = res.result;
-          const totalStr = total > 0 ? ` / ${total}` : '';
-          setStatus(`已收集 ${count}${totalStr} 条评论...`, '');
+          const pct = total > 0 ? Math.round(count / total * 100) : 0;
+          setStatus(`已收集 ${count} / ${total} (${pct}%)`, '');
 
-          if (i > 20 && count > 0) {
-            if (count === prevCount) {
-              staleCount++;
-              if (staleCount >= MAX_STALE) break;
-            } else {
-              staleCount = 0;
-            }
+          if (total > 0 && count >= total) break;
+          if (count === prevCountDy) {
+            staleCountDy++;
+            if (staleCountDy >= MAX_STALE_DY) break;
+          } else {
+            staleCountDy = 0;
           }
-          prevCount = count;
+          prevCountDy = count;
         }
       }
     }
