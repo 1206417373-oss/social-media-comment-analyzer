@@ -491,30 +491,24 @@ async function fetchFirstCommentPage() {
 }
 
 // 小红书专用：主动调用API翻页
-// 通过滚动评论区触发页面自然翻页（让XHS自己生成签名）
-// 不能自己调API：X-s/X-t签名每次请求独立计算，复用旧签名会失败
-async function fetchNextCommentPage() {
-  // 滚动评论区容器触发页面加载下一页
-  const containers = document.querySelectorAll('[class*="comment"]');
-  let scrolled = false;
-  for (const el of containers) {
-    if (el.scrollHeight > el.clientHeight + 10) {
-      // 向上滚一点再向下滚到底，强制触发懒加载
-      el.scrollTop = Math.max(0, el.scrollTop - 300);
+// 滚动评论区触发页面自然翻页
+// 不能自己调API：X-s/X-t签名每次独立计算
+function fetchNextCommentPage() {
+  try {
+    var all = document.querySelectorAll('*');
+    var count = 0;
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      if (el.nodeType !== 1) continue;
+      if (el.scrollHeight <= el.clientHeight) continue;
+      // 滚到底
       el.scrollTop = el.scrollHeight;
-      scrolled = true;
+      count++;
     }
+    return { ok: true, scrolled: count, comments: (window.__xhs_comments__ || []).length };
+  } catch (e) {
+    return { ok: false, error: e.message };
   }
-  // 也尝试滚整个页面
-  const noteScroller = document.querySelector('[class*="note-scroller"], [class*="detail"]');
-  if (noteScroller && noteScroller.scrollHeight > noteScroller.clientHeight + 10) {
-    noteScroller.scrollTop = Math.max(0, noteScroller.scrollTop - 300);
-    noteScroller.scrollTop = noteScroller.scrollHeight;
-    scrolled = true;
-  }
-
-  // 返回滚动前已有评论数，由popup判断是否有增长
-  return { scrolled, prevCount: window.__xhs_comments__.length };
 }
 
 function scrollToLoadComments(platform) {
