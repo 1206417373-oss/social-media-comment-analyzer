@@ -58,6 +58,9 @@ analyzeBtn.addEventListener('click', async () => {
   analyzeBtn.disabled = true;
   analyzeBtn.textContent = '分析中...';
 
+  // 诊断：直接显示判定结果
+  setStatus('平台=' + (currentPlatform || '未知') + ' tabId=' + currentTabId, '');
+
   try {
     // ===== Step 0: SPA导航检测——如果切换了帖子，清空旧数据 =====
     // 小红书拦截器由 injected.js 在 document_start 自动注入，无需手动注入
