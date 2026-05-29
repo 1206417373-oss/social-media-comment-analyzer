@@ -111,18 +111,17 @@ analyzeBtn.addEventListener('click', async () => {
 
       let prevCount = 0;
       let staleCount = 0;
-      const MAX_STALE = 3;
-      const MAX_PAGES = 30;
+      const MAX_STALE = 5;   // 连续5轮不涨才停止
+      const MAX_PAGES = 150; // 最多150页（3000条）
 
       for (let i = 0; i < MAX_PAGES; i++) {
-        // 滚动评论区，让页面自己翻页（生成正确签名）
-        const [scrollRes] = await chrome.scripting.executeScript({
+        await chrome.scripting.executeScript({
           target: { tabId: currentTabId },
           world: 'MAIN',
           func: fetchNextCommentPage
         });
 
-        await sleep(2000);  // 等页面发API + 拦截器处理
+        await sleep(1500);  // 等页面发API + 拦截器处理
 
         // 每2轮检查进度
         if (i % 2 === 0) {
@@ -133,23 +132,18 @@ analyzeBtn.addEventListener('click', async () => {
             args: [currentPlatform]
           });
           const { count, total } = res.result;
-          const totalStr = total > 0 ? ` / ${total}` : '';
-          setStatus(`已收集 ${count}${totalStr} 条评论...`, '');
+          const pct = total > 0 ? Math.round(count / total * 100) : 0;
+          setStatus(`已收集 ${count} / ${total} (${pct}%)`, '');
 
-          console.log('[popup] 翻页进度:', count, '/', total, '页:', i);
-
-          if (count > 0) {
-            if (count === prevCount) {
-              staleCount++;
-              if (staleCount >= MAX_STALE) break;
-            } else {
-              staleCount = 0;
-            }
-            prevCount = count;
-          } else {
+          // 达到总数或连续不涨则停止
+          if (total > 0 && count >= total) break;
+          if (count === prevCount) {
             staleCount++;
-            if (staleCount >= 5) break;  // 一直没评论多等几轮
+            if (staleCount >= MAX_STALE) break;
+          } else {
+            staleCount = 0;
           }
+          prevCount = count;
         }
       }
     } else {
@@ -495,15 +489,16 @@ async function fetchFirstCommentPage() {
 // 不能自己调API：X-s/X-t签名每次独立计算
 function fetchNextCommentPage() {
   try {
-    var all = document.querySelectorAll('*');
+    // 优先滚评论区相关容器（避免滚到首页信息流）
+    var sel = '[class*="comment"], [class*="note-scroll"], [class*="detail-scroll"], [class*="chat"]';
+    var containers = document.querySelectorAll(sel);
     var count = 0;
-    for (var i = 0; i < all.length; i++) {
-      var el = all[i];
-      if (el.nodeType !== 1) continue;
-      if (el.scrollHeight <= el.clientHeight) continue;
-      // 滚到底
-      el.scrollTop = el.scrollHeight;
-      count++;
+    for (var i = 0; i < containers.length; i++) {
+      var el = containers[i];
+      if (el.scrollHeight > el.clientHeight + 5) {
+        el.scrollTop = el.scrollHeight;
+        count++;
+      }
     }
     return { ok: true, scrolled: count, comments: (window.__xhs_comments__ || []).length };
   } catch (e) {
