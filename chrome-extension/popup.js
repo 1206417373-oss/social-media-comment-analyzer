@@ -223,11 +223,19 @@ function injectInterceptor(platform) {
   const commentsKey = prefix + '_comments__';
   const totalKey = prefix + '_total__';
 
-  if (window[initKey]) return;
+  if (window[initKey]) {
+    // 已初始化：只清空旧数据（不重新包装fetch，避免双层wrapper）
+    window[commentsKey] = [];
+    window[totalKey] = 0;
+    if (window[prefix + '_seen__']) window[prefix + '_seen__'].clear();
+    if (platform === 'xiaohongshu') window.__xhs_api_info__ = null;
+    return;
+  }
   window[initKey] = true;
   window[commentsKey] = [];
   window[totalKey] = 0;
   const seen = new Set();
+  window[prefix + '_seen__'] = seen;  // 暴露引用，供外部清空
 
   const add = (text) => {
     if (!text || !text.trim()) return;
@@ -352,12 +360,16 @@ function injectInterceptor(platform) {
 }
 
 // 清空旧评论数据，防止SPA导航时残留
+// 直接操作window上的引用清空数据，不重新包装fetch
 function resetCommentState(platform) {
   const prefix = platform === 'douyin' ? '__dy' : '__xhs';
-  window[prefix + '_init__'] = false;
-  window[prefix + '_comments__'] = [];
-  window[prefix + '_total__'] = 0;
-  window.__xhs_api_info__ = null;
+  // 只在已初始化时才清空（首次运行由injectInterceptor自己初始化）
+  if (window[prefix + '_init__']) {
+    window[prefix + '_comments__'] = [];
+    window[prefix + '_total__'] = 0;
+    if (window[prefix + '_seen__']) window[prefix + '_seen__'].clear();
+  }
+  if (platform === 'xiaohongshu') window.__xhs_api_info__ = null;
   window.__scroll_tick__ = 0;
 }
 
