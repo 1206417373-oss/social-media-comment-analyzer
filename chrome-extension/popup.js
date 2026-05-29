@@ -387,34 +387,93 @@ function resetCommentState(platform) {
   window.__scroll_tick__ = 0;
 }
 
-// 小红书专用：主动发起首屏评论请求（async让executeScript正确等待Promise）
+// 小红书专用：主动发起首屏评论请求
+// 自己调API+解析+存comments，不依赖拦截器的fetch包装
 async function fetchFirstCommentPage() {
-  console.log('[fetchFirstPage] fn exists:', !!window.__xhs_fetchFirstPage__);
-  if (window.__xhs_fetchFirstPage__) {
-    try {
-      const ok = await window.__xhs_fetchFirstPage__();
-      console.log('[fetchFirstPage] ok:', ok, 'comments:', window.__xhs_comments__?.length);
-      return ok;
-    } catch (e) {
-      console.error('[fetchFirstPage] error:', e);
-      return false;
-    }
+  // 从URL提取note_id
+  const m = window.location.href.match(/\/explore\/([a-f0-9]{24})/);
+  if (!m) { console.error('[fetchFirstPage] 无法提取noteId, url:', window.location.href); return false; }
+  const noteId = m[1];
+
+  const apiUrl = 'https://www.xiaohongshu.com/api/sns/web/v2/comment/page?' +
+    new URLSearchParams({ note_id: noteId, cursor: '', top_comment_id: '', image_scenes: '' }).toString();
+
+  try {
+    const resp = await fetch(apiUrl, { headers: { 'Accept': 'application/json' } });
+    const json = await resp.json();
+    const data = json?.data || json;
+    const comments = data?.comments || [];
+
+    // 初始化存储
+    if (!window.__xhs_comments__) window.__xhs_comments__ = [];
+    if (!window.__xhs_seen__) window.__xhs_seen__ = new Set();
+    if (!window.__xhs_total__) window.__xhs_total__ = 0;
+
+    // 收集评论
+    const add = (text) => {
+      if (!text || !text.trim()) return;
+      const k = text.trim();
+      if (window.__xhs_seen__.has(k)) return;
+      window.__xhs_seen__.add(k);
+      window.__xhs_comments__.push(k);
+    };
+    comments.forEach(c => {
+      if (c.content) add(c.content);
+      (c.sub_comments || c.sub_comment_list || []).forEach(s => {
+        if (s.content) add(s.content);
+      });
+    });
+
+    // 记录翻页信息
+    window.__xhs_total__ = data.total_comment_count || data.total_count || window.__xhs_total__;
+    window.__xhs_api_info__ = { lastCursor: data.cursor || '' };
+    console.log('[fetchFirstPage] 收集评论:', window.__xhs_comments__.length, 'total:', window.__xhs_total__, 'cursor:', data.cursor);
+    return true;
+  } catch (e) {
+    console.error('[fetchFirstPage] fetch失败:', e);
+    return false;
   }
-  return false;
 }
 
 // 小红书专用：主动调用API翻页
 async function fetchNextCommentPage() {
-  if (window.__xhs_fetchNextPage__) {
-    try {
-      const ok = await window.__xhs_fetchNextPage__();
-      return ok;
-    } catch (e) {
-      console.error('[fetchNextPage] error:', e);
-      return false;
-    }
+  const info = window.__xhs_api_info__;
+  if (!info || !info.lastCursor) { console.log('[fetchNextPage] 无cursor, 停止翻页'); return false; }
+
+  const m = window.location.href.match(/\/explore\/([a-f0-9]{24})/);
+  if (!m) return false;
+  const noteId = m[1];
+
+  const apiUrl = 'https://www.xiaohongshu.com/api/sns/web/v2/comment/page?' +
+    new URLSearchParams({ note_id: noteId, cursor: info.lastCursor, top_comment_id: '', image_scenes: '' }).toString();
+
+  try {
+    const resp = await fetch(apiUrl, { headers: { 'Accept': 'application/json' } });
+    const json = await resp.json();
+    const data = json?.data || json;
+    const comments = data?.comments || [];
+
+    const add = (text) => {
+      if (!text || !text.trim()) return;
+      const k = text.trim();
+      if (window.__xhs_seen__.has(k)) return;
+      window.__xhs_seen__.add(k);
+      window.__xhs_comments__.push(k);
+    };
+    comments.forEach(c => {
+      if (c.content) add(c.content);
+      (c.sub_comments || c.sub_comment_list || []).forEach(s => {
+        if (s.content) add(s.content);
+      });
+    });
+
+    info.lastCursor = data.cursor || '';
+    console.log('[fetchNextPage] 本轮+', comments.length, '总数:', window.__xhs_comments__.length);
+    return !!data.cursor;  // has more
+  } catch (e) {
+    console.error('[fetchNextPage] fetch失败:', e);
+    return false;
   }
-  return false;
 }
 
 function scrollToLoadComments(platform) {
