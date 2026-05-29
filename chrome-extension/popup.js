@@ -76,8 +76,17 @@ analyzeBtn.addEventListener('click', async () => {
       });
     }
 
-    // ===== Step 1: 拦截器已由 injected.js 在 document_start 自动注入 =====
-    // 小红书和抖音都无需手动注入
+    // ===== Step 1: 抖音手动注入拦截器（document_start太早，抖音JS会覆盖fetch） =====
+    // 小红书拦截器由 injected.js 在 document_start 自动注入
+    if (currentPlatform === 'douyin') {
+      setStatus('注入拦截器...', '');
+      await chrome.scripting.executeScript({
+        target: { tabId: currentTabId },
+        world: 'MAIN',
+        func: injectInterceptor,
+        args: [currentPlatform]
+      });
+    }
 
     // ===== Step 2: 加载评论 =====
     // 小红书用 API 翻页（绕过DOM滚动问题），抖音用滚动
