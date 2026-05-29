@@ -1,5 +1,5 @@
 /**
- * popup.js - 动态注入方案。
+ * popup.js - 动态注入方案（多平台支持）。
  * 所有代码通过 scripting.executeScript 注入到 MAIN world 执行。
  */
 
@@ -9,7 +9,9 @@ const apiKeyInput = document.getElementById('apiKey');
 const badge = document.getElementById('badge');
 
 let currentTabId = null;
-let isXhsPage = false;
+let currentPlatform = null;  // 'xiaohongshu' | 'douyin' | null
+
+const PLATFORM_NAMES = { xiaohongshu: '小红书', douyin: '抖音' };
 
 (async () => {
   const stored = await chrome.storage.local.get(['deepseek_api_key']);
@@ -24,22 +26,28 @@ let isXhsPage = false;
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab) {
     currentTabId = tab.id;
-    isXhsPage = tab.url && tab.url.includes('xiaohongshu.com/explore');
+    const url = tab.url || '';
+    if (url.includes('xiaohongshu.com/explore')) {
+      currentPlatform = 'xiaohongshu';
+    } else if (url.includes('douyin.com')) {
+      currentPlatform = 'douyin';
+    }
   }
 
-  if (isXhsPage) {
-    badge.innerHTML = '<span class="status-badge active"><span class="status-dot active"></span>小红书帖子页</span>';
+  if (currentPlatform) {
+    badge.innerHTML = '<span class="status-badge active"><span class="status-dot active"></span>' +
+      PLATFORM_NAMES[currentPlatform] + '帖子页</span>';
     analyzeBtn.disabled = false;
     analyzeBtn.textContent = '开始分析';
   } else {
-    badge.innerHTML = '<span class="status-badge inactive"><span class="status-dot inactive"></span>请先打开一个小红书帖子</span>';
+    badge.innerHTML = '<span class="status-badge inactive"><span class="status-dot inactive"></span>请先打开小红书或抖音帖子</span>';
     analyzeBtn.disabled = true;
     analyzeBtn.textContent = '当前页面不支持';
   }
 })();
 
 analyzeBtn.addEventListener('click', async () => {
-  if (!isXhsPage) return;
+  if (!currentPlatform) return;
   const apiKey = apiKeyInput.value.trim();
   if (!apiKey) {
     setStatus('请先输入 DeepSeek API Key', 'error');
@@ -56,7 +64,8 @@ analyzeBtn.addEventListener('click', async () => {
     await chrome.scripting.executeScript({
       target: { tabId: currentTabId },
       world: 'MAIN',
-      func: injectInterceptor
+      func: injectInterceptor,
+      args: [currentPlatform]
     });
 
     // ===== Step 2: 滚动加载评论 =====
@@ -66,7 +75,8 @@ analyzeBtn.addEventListener('click', async () => {
       await chrome.scripting.executeScript({
         target: { tabId: currentTabId },
         world: 'MAIN',
-        func: scrollToLoadComments
+        func: scrollToLoadComments,
+        args: [currentPlatform]
       });
       await sleep(1000);
 
@@ -74,7 +84,8 @@ analyzeBtn.addEventListener('click', async () => {
         const [res] = await chrome.scripting.executeScript({
           target: { tabId: currentTabId },
           world: 'MAIN',
-          func: getProgress
+          func: getProgress,
+          args: [currentPlatform]
         });
         const { count, total } = res.result;
         const totalStr = total > 0 ? ` / ${total}` : '';
@@ -91,7 +102,8 @@ analyzeBtn.addEventListener('click', async () => {
     const [dataRes] = await chrome.scripting.executeScript({
       target: { tabId: currentTabId },
       world: 'MAIN',
-      func: extractAllData
+      func: extractAllData,
+      args: [currentPlatform]
     });
     const pageData = dataRes.result;
 
@@ -108,7 +120,7 @@ analyzeBtn.addEventListener('click', async () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        platform: 'xiaohongshu',
+        platform: currentPlatform,
         post_content: pageData.post_content,
         images: pageData.images,
         comments: pageData.comments,
@@ -136,13 +148,18 @@ analyzeBtn.addEventListener('click', async () => {
   }
 });
 
-// ===== 注入到页面的函数（会在 MAIN world 执行） =====
+// ===== 注入到页面的函数（会在 MAIN world 执行，通过 args 接收平台参数） =====
 
-function injectInterceptor() {
-  if (window.__xhs_init__) return;
-  window.__xhs_init__ = true;
-  window.__xhs_comments__ = [];
-  window.__xhs_total__ = 0;
+function injectInterceptor(platform) {
+  const prefix = platform === 'douyin' ? '__dy' : '__xhs';
+  const initKey = prefix + '_init__';
+  const commentsKey = prefix + '_comments__';
+  const totalKey = prefix + '_total__';
+
+  if (window[initKey]) return;
+  window[initKey] = true;
+  window[commentsKey] = [];
+  window[totalKey] = 0;
   const seen = new Set();
 
   const add = (text) => {
@@ -150,17 +167,37 @@ function injectInterceptor() {
     const k = text.trim();
     if (seen.has(k)) return;
     seen.add(k);
-    window.__xhs_comments__.push(k);
+    window[commentsKey].push(k);
   };
 
-  const collect = (items) => {
-    (items || []).forEach(c => {
-      if (c.content) add(c.content);
-      (c.sub_comments || c.sub_comment_list || []).forEach(s => {
-        if (s.content) add(s.content);
+  let collect, urlMatch;
+
+  if (platform === 'douyin') {
+    // 抖音：拦截评论列表和子回复 API
+    urlMatch = (url) =>
+      url.includes('/aweme/v1/web/comment/list/') ||
+      url.includes('/aweme/v1/web/comment/list/reply/');
+
+    collect = (items) => {
+      (items || []).forEach(c => {
+        if (c.content) add(c.content);
+        else if (c.text) add(c.text);
       });
-    });
-  };
+    };
+  } else {
+    // 小红书：拦截评论 API
+    urlMatch = (url) =>
+      url.includes('/api/sns/web') && url.includes('comment');
+
+    collect = (items) => {
+      (items || []).forEach(c => {
+        if (c.content) add(c.content);
+        (c.sub_comments || c.sub_comment_list || []).forEach(s => {
+          if (s.content) add(s.content);
+        });
+      });
+    };
+  }
 
   // 拦截 fetch
   const _fetch = window.fetch;
@@ -168,10 +205,12 @@ function injectInterceptor() {
     const input = args[0];
     const url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
     return _fetch.apply(this, args).then(r => {
-      if (url.includes('/api/sns/web') && url.includes('comment')) {
+      if (urlMatch(url)) {
         r.clone().json().then(d => {
           const data = d?.data || d;
-          window.__xhs_total__ = data.total_comment_count || data.total_count || window.__xhs_total__;
+          if (platform === 'xiaohongshu') {
+            window[totalKey] = data.total_comment_count || data.total_count || window[totalKey];
+          }
           collect(data.comments);
         }).catch(() => {});
       }
@@ -187,11 +226,13 @@ function injectInterceptor() {
   X.send = function (...a) {
     const url = _u;
     this.addEventListener('load', function () {
-      if (url.includes('/api/sns/web') && url.includes('comment')) {
+      if (urlMatch(url)) {
         try {
           const d = JSON.parse(this.responseText);
           const data = d?.data || d;
-          window.__xhs_total__ = data.total_comment_count || data.total_count || window.__xhs_total__;
+          if (platform === 'xiaohongshu') {
+            window[totalKey] = data.total_comment_count || data.total_count || window[totalKey];
+          }
           collect(data.comments);
         } catch (e) { }
       }
@@ -200,43 +241,91 @@ function injectInterceptor() {
   };
 }
 
-function scrollToLoadComments() {
-  // 先滚窗口到底部，让评论区进入视口触发首次加载
+function scrollToLoadComments(platform) {
+  // 先滚窗口到底部
   window.scrollTo(0, document.body.scrollHeight);
 
-  // 再尝试滚评论区容器
-  const container = document.querySelector(
-    '.comment-container, [class*="comment"][class*="container"], [class*="comments"], [class*="comment-wrapper"], [class*="note-comment"]'
-  );
-  if (container) {
-    container.scrollTop = container.scrollHeight;
+  if (platform === 'douyin') {
+    // 抖音评论区容器
+    const container = document.querySelector(
+      '.comment-mainContent, [class*="comment"][class*="list"], [class*="CommentListContainer"], [class*="comment-container"]'
+    );
+    if (container) {
+      container.scrollTop = container.scrollHeight;
+    }
+  } else {
+    // 小红书评论区容器
+    const container = document.querySelector(
+      '.comment-container, [class*="comment"][class*="container"], [class*="comments"], [class*="comment-wrapper"], [class*="note-comment"]'
+    );
+    if (container) {
+      container.scrollTop = container.scrollHeight;
+    }
   }
 }
 
-function getProgress() {
+function getProgress(platform) {
+  const prefix = platform === 'douyin' ? '__dy' : '__xhs';
   return {
-    count: window.__xhs_comments__?.length || 0,
-    total: window.__xhs_total__ || 0
+    count: window[prefix + '_comments__']?.length || 0,
+    total: window[prefix + '_total__'] || 0
   };
 }
 
-function extractAllData() {
+function extractAllData(platform) {
+  const prefix = platform === 'douyin' ? '__dy' : '__xhs';
   let postContent = '';
-  for (const sel of ['#detail-desc', '.note-content', '[class*="desc"]']) {
-    const el = document.querySelector(sel);
-    if (el && el.innerText && el.innerText.trim().length > 5) {
-      postContent = el.innerText.trim(); break;
+  let images = [];
+
+  if (platform === 'douyin') {
+    // ===== 抖音：提取帖子正文 =====
+    for (const sel of [
+      '.video-info-detail', '.note-detail', '[data-e2e="description"]',
+      '.desc-text', '[class*="desc-text"], [class*="video-info"] span'
+    ]) {
+      const el = document.querySelector(sel);
+      if (el && el.innerText && el.innerText.trim().length > 5) {
+        postContent = el.innerText.trim();
+        break;
+      }
     }
+
+    // ===== 抖音：提取图片 =====
+    const seenSrc = new Set();
+    // 笔记帖（swiper轮播图）
+    document.querySelectorAll('.swiper-slide img, [class*="note-image"] img, [class*="image-card"] img').forEach(img => {
+      const src = img.src || img.getAttribute('data-src') || '';
+      if (src && src.startsWith('http') && !seenSrc.has(src)) {
+        seenSrc.add(src);
+        images.push(src);
+      }
+    });
+    // 如果没找到图片，可能是视频帖，尝试从封面或 og:image 获取
+    if (!images.length) {
+      const ogImg = document.querySelector('meta[property="og:image"]');
+      if (ogImg && ogImg.content) {
+        images.push(ogImg.content);
+      }
+    }
+  } else {
+    // ===== 小红书：提取帖子正文 =====
+    for (const sel of ['#detail-desc', '.note-content', '[class*="desc"]']) {
+      const el = document.querySelector(sel);
+      if (el && el.innerText && el.innerText.trim().length > 5) {
+        postContent = el.innerText.trim();
+        break;
+      }
+    }
+
+    // ===== 小红书：提取图片 =====
+    document.querySelectorAll('.swiper-slide img, [class*="slide"] img').forEach(img => {
+      const src = img.src || img.getAttribute('data-src') || '';
+      if (src && src.startsWith('http')) images.push(src);
+    });
   }
 
-  const images = [];
-  document.querySelectorAll('.swiper-slide img, [class*="slide"] img').forEach(img => {
-    const src = img.src || img.getAttribute('data-src') || '';
-    if (src && src.startsWith('http')) images.push(src);
-  });
-
-  // 拦截器收集的评论
-  let comments = [...new Set(window.__xhs_comments__ || [])];
+  // ===== 收集评论（优先从拦截器获取） =====
+  let comments = [...new Set(window[prefix + '_comments__'] || [])];
 
   // DOM 兜底：如果拦截器没抓到，从 DOM 里提取
   if (!comments.length) {
@@ -245,22 +334,39 @@ function extractAllData() {
       const t = (el.innerText || el.textContent || '').trim();
       if (t && t.length > 1 && !seen.has(t)) { seen.add(t); comments.push(t); }
     };
-    // 主评论
-    document.querySelectorAll(
-      '[class*="comment-item"], [class*="commentItem"], [class*="comment"]:not([class*="container"]):not([class*="wrapper"])'
-    ).forEach(addDom);
-    // 查找评论区内的所有文本段落
-    const container = document.querySelector(
-      '.comment-container, [class*="comment"][class*="container"], [class*="comments"], [class*="comment-wrapper"]'
-    );
-    if (container) {
-      container.querySelectorAll('p, span, div').forEach(el => {
-        // 只取短文本（评论通常不长）
-        const t = (el.innerText || '').trim();
-        if (t.length > 2 && t.length < 500 && el.children.length === 0 && !seen.has(t)) {
-          seen.add(t); comments.push(t);
-        }
-      });
+
+    if (platform === 'douyin') {
+      // 抖音评论区DOM
+      document.querySelectorAll(
+        '[class*="comment-item"], [class*="CommentItem"], [class*="comment-content"]'
+      ).forEach(addDom);
+      const container = document.querySelector(
+        '.comment-mainContent, [class*="comment"][class*="list"], [class*="CommentListContainer"]'
+      );
+      if (container) {
+        container.querySelectorAll('p, span, div').forEach(el => {
+          const t = (el.innerText || '').trim();
+          if (t.length > 2 && t.length < 500 && el.children.length === 0 && !seen.has(t)) {
+            seen.add(t); comments.push(t);
+          }
+        });
+      }
+    } else {
+      // 小红书评论区DOM
+      document.querySelectorAll(
+        '[class*="comment-item"], [class*="commentItem"], [class*="comment"]:not([class*="container"]):not([class*="wrapper"])'
+      ).forEach(addDom);
+      const container = document.querySelector(
+        '.comment-container, [class*="comment"][class*="container"], [class*="comments"], [class*="comment-wrapper"]'
+      );
+      if (container) {
+        container.querySelectorAll('p, span, div').forEach(el => {
+          const t = (el.innerText || '').trim();
+          if (t.length > 2 && t.length < 500 && el.children.length === 0 && !seen.has(t)) {
+            seen.add(t); comments.push(t);
+          }
+        });
+      }
     }
   }
 

@@ -626,7 +626,7 @@ body {
           <input type="text" id="postUrl" placeholder="粘贴小红书/抖音帖子链接" oninput="autoDetectPlatform()">
           <span class="url-platform-badge" id="urlPlatformBadge">未识别</span>
         </div>
-        <div class="hint">支持小红书链接和 xhslink.com 短链</div>
+        <div class="hint">支持小红书链接、抖音链接和 xhslink.com 短链</div>
       </div>
     </div>
 
@@ -1513,7 +1513,9 @@ async function checkChromeExtensionResult() {
       const analysis = d.analysis || {};
       analysis._rawComments = d.comments;
       analysis._rawPostContent = d.post_content;
-      renderResult(analysis, d.comment_count || d.comments.length, '小红书');
+      const platformMap = { xiaohongshu: '小红书', douyin: '抖音', weibo: '微博' };
+      const platformName = platformMap[d.platform] || '小红书';
+      renderResult(analysis, d.comment_count || d.comments.length, platformName);
       // 清除后端已读结果
       fetch('http://localhost:8000/clear-result', { method: 'POST' });
     }

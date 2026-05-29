@@ -15,7 +15,8 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
-load_dotenv()
+# 确保从 backend/.env 加载（无论从哪个目录启动）
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 print("XHS_COOKIE前20字符:", os.getenv("XHS_COOKIE", "未读取到")[:20])
 
@@ -128,6 +129,14 @@ async def _crawl_post(url: str, platform: str) -> dict:
         cookie = os.getenv("XHS_COOKIE", "")
         if not cookie:
             raise RuntimeError("请先在 .env 中配置 XHS_COOKIE")
+        print(f"[爬虫诊断] Cookie长度: {len(cookie)}, 前30字符: {cookie[:30]}")
+        return await fetch_post(url, cookie)
+
+    elif platform == "douyin":
+        from crawlers.douyin import fetch_post
+        cookie = os.getenv("DOUYIN_COOKIE", "")
+        if not cookie:
+            raise RuntimeError("请先在 .env 中配置 DOUYIN_COOKIE")
         print(f"[爬虫诊断] Cookie长度: {len(cookie)}, 前30字符: {cookie[:30]}")
         return await fetch_post(url, cookie)
 
@@ -275,6 +284,7 @@ async def analyze_direct(req: AnalyzeDirectRequest):
     return {
         "success": True,
         "data": {
+            "platform": req.platform,
             "post_content": req.post_content,
             "images": req.images,
             "comments": req.comments,
@@ -298,8 +308,8 @@ async def analyze(req: AnalyzeRequest):
         return {"success": False, "error": str(e)}
     except RuntimeError as e:
         return {"success": False, "error": str(e)}
-    except Exception:
-        return {"success": False, "error": "获取数据失败，请检查Cookie配置"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
     # 2. 调用DeepSeek分析
     try:

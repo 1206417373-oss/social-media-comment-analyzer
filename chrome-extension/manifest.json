@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
-  "name": "小红书分析助手",
+  "name": "社交媒体分析助手",
   "version": "2.0.0",
-  "description": "一键抓取小红书帖子内容，通过AI分析用户评论洞察",
+  "description": "一键抓取小红书/抖音帖子内容，通过AI分析用户评论洞察",
   "permissions": ["activeTab", "scripting", "storage"],
-  "host_permissions": ["*://*.xiaohongshu.com/*", "http://localhost/*"],
+  "host_permissions": ["*://*.xiaohongshu.com/*", "*://*.douyin.com/*", "http://localhost/*"],
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
