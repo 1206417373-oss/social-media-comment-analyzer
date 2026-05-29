@@ -59,13 +59,22 @@ analyzeBtn.addEventListener('click', async () => {
   analyzeBtn.textContent = '分析中...';
 
   try {
-    // ===== Step 0: 清空旧数据（SPA导航可能残留上个帖子的评论） =====
-    await chrome.scripting.executeScript({
-      target: { tabId: currentTabId },
-      world: 'MAIN',
-      func: resetCommentState,
-      args: [currentPlatform]
-    });
+    // ===== Step 0: SPA导航检测——如果切换了帖子，清空旧数据 =====
+    // 小红书拦截器由 injected.js 在 document_start 自动注入，无需手动注入
+    if (currentPlatform === 'xiaohongshu') {
+      await chrome.scripting.executeScript({
+        target: { tabId: currentTabId },
+        world: 'MAIN',
+        func: checkAndResetIfNewPost
+      });
+    } else {
+      await chrome.scripting.executeScript({
+        target: { tabId: currentTabId },
+        world: 'MAIN',
+        func: resetCommentState,
+        args: [currentPlatform]
+      });
+    }
 
     // ===== Step 1: 小红书拦截器已由 injected.js 在 document_start 自动注入 =====
     // 抖音仍需手动注入（没有 content_script 预加载）
@@ -403,8 +412,32 @@ function injectInterceptor(platform) {
   }
 }
 
-// 清空旧评论数据，防止SPA导航时残留
-// 直接操作window上的引用清空数据，不重新包装fetch
+// 小红书专用：检测是否切换到新帖子，只在切换时清空数据
+// 如果还是同一个帖子，保留已收集的评论（拦截器在document_start就开始收集了）
+function checkAndResetIfNewPost() {
+  const m = window.location.href.match(/\/explore\/([a-f0-9]{24})/);
+  const currentNoteId = m ? m[1] : '';
+  const lastNoteId = window.__xhs_last_note_id__ || '';
+
+  if (currentNoteId && currentNoteId !== lastNoteId) {
+    // 切换到新帖子，清空旧数据
+    console.log('[checkAndReset] 检测到新帖子:', currentNoteId, '旧:', lastNoteId, '清空数据');
+    window.__xhs_comments__ = [];
+    window.__xhs_total__ = 0;
+    window.__xhs_seen__ && window.__xhs_seen__.clear();
+    window.__xhs_api_info__ = null;
+    window.__xhs_last_note_id__ = currentNoteId;
+  } else if (currentNoteId === lastNoteId) {
+    // 同一帖子，保留已收集的评论
+    console.log('[checkAndReset] 同一帖子，保留', window.__xhs_comments__.length, '条已收集评论');
+  } else {
+    // 首次运行，记录当前帖子
+    console.log('[checkAndReset] 首次运行, 记录帖子:', currentNoteId);
+    window.__xhs_last_note_id__ = currentNoteId;
+  }
+}
+
+// 抖音：清空旧评论数据
 function resetCommentState(platform) {
   const prefix = platform === 'douyin' ? '__dy' : '__xhs';
   // 只在已初始化时才清空（首次运行由injectInterceptor自己初始化）
