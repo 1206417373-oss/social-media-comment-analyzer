@@ -486,21 +486,19 @@ async function fetchFirstCommentPage() {
 
 // 小红书专用：主动调用API翻页
 // 滚动评论区触发页面自然翻页
-// 不能自己调API：X-s/X-t签名每次独立计算
 function fetchNextCommentPage() {
   try {
-    // 优先滚评论区相关容器（避免滚到首页信息流）
-    var sel = '[class*="comment"], [class*="note-scroll"], [class*="detail-scroll"], [class*="chat"]';
-    var containers = document.querySelectorAll(sel);
+    var all = document.querySelectorAll('*');
     var count = 0;
-    for (var i = 0; i < containers.length; i++) {
-      var el = containers[i];
-      if (el.scrollHeight > el.clientHeight + 5) {
-        el.scrollTop = el.scrollHeight;
-        count++;
-      }
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      if (el === document.body || el === document.documentElement) continue;
+      if (el.clientHeight === 0) continue;
+      if (el.scrollHeight <= el.clientHeight) continue;
+      el.scrollTop = el.scrollHeight;
+      count++;
     }
-    return { ok: true, scrolled: count, comments: (window.__xhs_comments__ || []).length };
+    return { ok: true, scrolled: count };
   } catch (e) {
     return { ok: false, error: e.message };
   }
