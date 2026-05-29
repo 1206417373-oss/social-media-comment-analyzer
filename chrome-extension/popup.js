@@ -58,9 +58,6 @@ analyzeBtn.addEventListener('click', async () => {
   analyzeBtn.disabled = true;
   analyzeBtn.textContent = '分析中...';
 
-  // 诊断：直接显示判定结果
-  setStatus('平台=' + (currentPlatform || '未知') + ' tabId=' + currentTabId, '');
-
   try {
     // ===== Step 0: SPA导航检测——如果切换了帖子，清空旧数据 =====
     // 小红书拦截器由 injected.js 在 document_start 自动注入，无需手动注入
@@ -94,21 +91,7 @@ analyzeBtn.addEventListener('click', async () => {
     // ===== Step 2: 加载评论 =====
     // 小红书用 API 翻页（绕过DOM滚动问题），抖音用滚动
     if (currentPlatform === 'xiaohongshu') {
-      setStatus('检查已有评论...', '');
-
-      // 诊断：在ISOLATED world测试（如果MAIN被阻止）
-      const [isoRes] = await chrome.scripting.executeScript({
-        target: { tabId: currentTabId },
-        world: 'ISOLATED',
-        func: () => {
-          console.log('[DIAG-ISO] ISOLATED world 注入成功');
-          return document.title;
-        }
-      });
-      console.log('[popup] DIAG-ISO result:', isoRes?.result);
-      setStatus('ISO诊断: ' + (isoRes?.result ? 'OK' : 'FAIL'), '');
-
-      // 正式注入到 MAIN world
+      setStatus('获取评论...', '');
       const [firstRes] = await chrome.scripting.executeScript({
         target: { tabId: currentTabId },
         world: 'MAIN',
@@ -500,15 +483,7 @@ async function fetchFirstCommentPage() {
   // 等待拦截器捕获页面API调用
   // 如果已有评论说明拦截器已工作，直接成功
   if (window.__xhs_comments__.length > 0) {
-    const info = window.__xhs_api_info__;
-    console.log('[fetchFirstPage] 已有', window.__xhs_comments__.length, '条评论');
-    console.log('[fetchFirstPage] __xhs_api_info__:', JSON.stringify({
-      hasInfo: !!info,
-      hasLastCursor: !!(info && info.lastCursor),
-      lastCursor: info ? info.lastCursor : 'N/A',
-      hasHeaders: !!(info && info.headers && Object.keys(info.headers).length > 0),
-      hasAllParams: !!(info && info.allParams && Object.keys(info.allParams).length > 0)
-    }));
+    console.log('[fetchFirstPage] 已有', window.__xhs_comments__.length, '条评论，cursor:', window.__xhs_api_info__?.lastCursor);
     return true;
   }
 
