@@ -514,7 +514,15 @@ function extractAllData(platform) {
   }
 
   // ===== 收集评论（优先从拦截器获取） =====
-  let comments = [...new Set(window[prefix + '_comments__'] || [])];
+  // 强力去重：trim + Set + 过滤空短串
+  const rawArr = window[prefix + '_comments__'] || [];
+  const dedup = new Set();
+  for (const c of rawArr) {
+    const t = (c || '').trim();
+    if (t.length >= 2) dedup.add(t);  // 过滤1字以下的无意义文本
+  }
+  let comments = [...dedup];
+  console.log('[提取数据] 原始条数:', rawArr.length, '去重后:', comments.length);
 
   // DOM 兜底：如果拦截器没抓到，从 DOM 里提取
   if (!comments.length) {
