@@ -42,7 +42,15 @@
   }
 
   function isCommentApi(url) {
-    if (isDY) return url.includes('/aweme/v1/web/comment/list/');
+    if (isDY) {
+      // 抖音可能的评论API格式
+      if (url.includes('comment/list') || url.includes('comment/list/reply')) return true;
+      // 诊断：记录其他疑似API的请求
+      if (url.includes('/aweme/') || url.includes('/web/')) {
+        console.log('[DY诊断] 非评论API:', url.substring(0, 120));
+      }
+      return false;
+    }
     return url.includes('/api/sns/web') && url.includes('comment');
   }
 
