@@ -50,14 +50,18 @@
       // 合并而非覆盖：保留已有headers（XHR可能已捕获了X-S等签名头）
       const existingHeaders = (window.__xhs_api_info__ && window.__xhs_api_info__.headers) || {};
       const newHeaders = { ...existingHeaders, ...(init.headers || {}) };
+      // 捕获全部查询参数（不只是cursor），翻页时原样带上
+      const allParams = {};
+      parsedUrl.searchParams.forEach((v, k) => { allParams[k] = v; });
       window.__xhs_api_info__ = {
         url: url.split('?')[0],
         method: (init.method || 'GET').toUpperCase(),
         headers: newHeaders,
         body: init.body ? (typeof init.body === 'string' ? init.body : JSON.stringify(init.body)) : null,
         lastCursor: parsedUrl.searchParams.get('cursor') || '',
+        allParams: allParams,
       };
-      console.log('[自启拦截器-fetch] 捕获API请求, headers:', Object.keys(newHeaders));
+      console.log('[自启拦截器-fetch] 捕获, params:', Object.keys(allParams), 'headers:', Object.keys(newHeaders));
     }
 
     return _fetch.apply(this, args).then(r => {
@@ -95,14 +99,17 @@
     this.addEventListener('load', function () {
       if (isCommentApi(url)) {
         const parsedUrl = new URL(url, window.location.origin);
+        const allParams = {};
+        parsedUrl.searchParams.forEach((v, k) => { allParams[k] = v; });
         window.__xhs_api_info__ = {
           url: url.split('?')[0],
           method: 'GET',
           headers: headers,
           body: null,
           lastCursor: parsedUrl.searchParams.get('cursor') || '',
+          allParams: allParams,
         };
-        console.log('[自启拦截器-XHR] 捕获API请求, headers:', Object.keys(headers));
+        console.log('[自启拦截器-XHR] 捕获, params:', Object.keys(allParams), 'headers:', Object.keys(headers));
         try {
           const d = JSON.parse(this.responseText);
           const data = d?.data || d;

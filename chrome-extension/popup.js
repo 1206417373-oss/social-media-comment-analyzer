@@ -510,19 +510,15 @@ async function fetchNextCommentPage() {
   if (!m) return false;
   const noteId = m[1];
 
-  // 提取 xsec_token（小红书的CSRF token，页面URL和API都需要）
-  const xsecMatch = window.location.href.match(/[?&]xsec_token=([^&]+)/);
-  const xsecToken = xsecMatch ? decodeURIComponent(xsecMatch[1]) : '';
-
-  const apiUrl = 'https://www.xiaohongshu.com/api/sns/web/v2/comment/page?' +
-    new URLSearchParams({
-      note_id: noteId, cursor: info.lastCursor, top_comment_id: '', image_scenes: '',
-      ...(xsecToken ? { xsec_token: xsecToken } : {})
-    }).toString();
+  // 复用页面原API的所有查询参数，只更新cursor
+  const baseParams = info.allParams || {};
+  const params = { ...baseParams, cursor: info.lastCursor };
+  const apiUrl = (info.url || 'https://www.xiaohongshu.com/api/sns/web/v2/comment/page') +
+    '?' + new URLSearchParams(params).toString();
 
   // 使用拦截器捕获的headers（包含X-S等XHS签名头）
   const headers = info.headers || {};
-  console.log('[fetchNextPage] 翻页 cursor:', info.lastCursor, 'xsec:', !!xsecToken);
+  console.log('[fetchNextPage] 翻页 cursor:', info.lastCursor, 'params:', Object.keys(params));
 
   try {
     const resp = await fetch(apiUrl, { headers });
