@@ -67,14 +67,17 @@ analyzeBtn.addEventListener('click', async () => {
       args: [currentPlatform]
     });
 
-    // ===== Step 1: 注入拦截器到 MAIN world =====
-    setStatus('注入拦截器...', '');
-    await chrome.scripting.executeScript({
-      target: { tabId: currentTabId },
-      world: 'MAIN',
-      func: injectInterceptor,
-      args: [currentPlatform]
-    });
+    // ===== Step 1: 小红书拦截器已由 injected.js 在 document_start 自动注入 =====
+    // 抖音仍需手动注入（没有 content_script 预加载）
+    if (currentPlatform === 'douyin') {
+      setStatus('注入拦截器...', '');
+      await chrome.scripting.executeScript({
+        target: { tabId: currentTabId },
+        world: 'MAIN',
+        func: injectInterceptor,
+        args: [currentPlatform]
+      });
+    }
 
     // ===== Step 2: 加载评论 =====
     // 小红书用 API 翻页（绕过DOM滚动问题），抖音用滚动
