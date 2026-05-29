@@ -439,13 +439,19 @@ async function fetchFirstCommentPage() {
     }
   }
 
-  // 等待拦截器捕获页面API调用（轮询 __xhs_api_info__ 获取有效headers）
-  console.log('[fetchFirstPage] 等待页面自然加载评论（拦截器捕获请求头）...');
-  for (let i = 0; i < 15; i++) {
+  // 等待拦截器捕获页面API调用
+  // 如果已有评论说明拦截器已工作，直接成功
+  if (window.__xhs_comments__.length > 0) {
+    console.log('[fetchFirstPage] 拦截器已收集', window.__xhs_comments__.length, '条评论，跳过等待');
+    // 确保有 cursor（拦截器会从响应里更新）
+    return true;
+  }
+
+  console.log('[fetchFirstPage] 等待页面自然加载评论...');
+  for (let i = 0; i < 10; i++) {
     await new Promise(r => setTimeout(r, 1000));
-    const info = window.__xhs_api_info__;
-    if (info && info.headers && Object.keys(info.headers).length > 0) {
-      console.log('[fetchFirstPage] 拦截器已捕获headers, comments:', window.__xhs_comments__.length);
+    if (window.__xhs_comments__.length > 0) {
+      console.log('[fetchFirstPage] 拦截器已收集', window.__xhs_comments__.length, '条评论');
       return true;
     }
     // 继续滚动触发加载
@@ -454,12 +460,11 @@ async function fetchFirstCommentPage() {
         el.scrollTop = el.scrollHeight;
       }
     }
-    console.log('[fetchFirstPage] 等待中...', i + 1, '秒, comments:', window.__xhs_comments__.length);
+    console.log('[fetchFirstPage] 等待中...', i + 1, '秒');
   }
 
-  // 超时：拦截器未捕获到页面API调用
-  console.warn('[fetchFirstPage] 超时：拦截器未捕获到API headers，comments:', window.__xhs_comments__.length);
-  return window.__xhs_comments__.length > 0;  // 如果拦截器至少收集了一些评论也算成功
+  console.warn('[fetchFirstPage] 超时，comments:', window.__xhs_comments__.length);
+  return window.__xhs_comments__.length > 0;
 }
 
 // 小红书专用：主动调用API翻页
