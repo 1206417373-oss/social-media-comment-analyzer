@@ -1,128 +1,97 @@
 /**
  * injected.js — 在 document_start 注入 MAIN world。
- * 在页面JS执行前包装 fetch/XHR，确保捕获首屏评论API请求。
+ * 支持小红书 + 抖音，页面JS执行前包装 fetch/XHR。
  */
 (function init() {
-  if (window.__xhs_interceptor_ready__) return;
-  window.__xhs_interceptor_ready__ = true;
+  // 检测平台
+  var url = window.location.href;
+  var isXHS = url.includes('xiaohongshu.com');
+  var isDY = url.includes('douyin.com');
+  if (!isXHS && !isDY) return;
+
+  var prefix = isDY ? '__dy' : '__xhs';
+  var readyKey = prefix + '_interceptor_ready__';
+  if (window[readyKey]) return;
+  window[readyKey] = true;
 
   // ===== 全局状态 =====
-  window.__xhs_comments__ = window.__xhs_comments__ || [];
-  window.__xhs_total__ = 0;
-  window.__xhs_seen__ = window.__xhs_seen__ || new Set();
-  window.__xhs_api_info__ = null;
-
-  const commentsKey = '__xhs_comments__';
-  const totalKey = '__xhs_total__';
-  const seen = window.__xhs_seen__;
+  var commentsKey = prefix + '_comments__';
+  var totalKey = prefix + '_total__';
+  window[commentsKey] = window[commentsKey] || [];
+  window[totalKey] = 0;
+  var seen = window[prefix + '_seen__'] || new Set();
+  window[prefix + '_seen__'] = seen;
 
   function add(text) {
     if (!text || !text.trim()) return;
-    const k = text.trim();
+    var k = text.trim();
     if (seen.has(k)) return;
     seen.add(k);
     window[commentsKey].push(k);
   }
 
   function collect(items) {
-    (items || []).forEach(c => {
+    (items || []).forEach(function(c) {
       if (c.content) add(c.content);
-      (c.sub_comments || c.sub_comment_list || []).forEach(s => {
+      else if (c.text) add(c.text);
+      // 小红书有子回复
+      (c.sub_comments || c.sub_comment_list || []).forEach(function(s) {
         if (s.content) add(s.content);
       });
     });
-    console.log('[自启拦截器] 本轮收集后总数:', window[commentsKey].length, 'seen:', seen.size);
   }
 
   function isCommentApi(url) {
+    if (isDY) return url.includes('/aweme/v1/web/comment/list/');
     return url.includes('/api/sns/web') && url.includes('comment');
   }
 
+  function getPlatformName() { return isDY ? '抖音' : '小红书'; }
+
   // ===== 拦截 fetch =====
-  const _fetch = window.fetch;
-  window.fetch = function (...args) {
-    const input = args[0];
-    const url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
-    const init = args[1] || {};
+  var _fetch = window.fetch;
+  window.fetch = function () {
+    var args = arguments;
+    var input = args[0];
+    var url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
+    var init = args[1] || {};
 
-    if (isCommentApi(url)) {
-      const parsedUrl = new URL(url, window.location.origin);
-      // 合并而非覆盖：保留已有headers（XHR可能已捕获了X-S等签名头）
-      const existingHeaders = (window.__xhs_api_info__ && window.__xhs_api_info__.headers) || {};
-      const newHeaders = { ...existingHeaders, ...(init.headers || {}) };
-      // 捕获全部查询参数（不只是cursor），翻页时原样带上
-      const allParams = {};
-      parsedUrl.searchParams.forEach((v, k) => { allParams[k] = v; });
-      window.__xhs_api_info__ = {
-        url: url.split('?')[0],
-        method: (init.method || 'GET').toUpperCase(),
-        headers: newHeaders,
-        body: init.body ? (typeof init.body === 'string' ? init.body : JSON.stringify(init.body)) : null,
-        lastCursor: parsedUrl.searchParams.get('cursor') || '',
-        allParams: allParams,
-      };
-      console.log('[自启拦截器-fetch] 捕获, params:', Object.keys(allParams), 'headers:', Object.keys(newHeaders));
-    }
-
-    return _fetch.apply(this, args).then(r => {
+    return _fetch.apply(this, args).then(function(r) {
       if (isCommentApi(url)) {
-        r.clone().json().then(d => {
-          const data = d?.data || d;
+        r.clone().json().then(function(d) {
+          var data = d && d.data ? d.data : d;
           window[totalKey] = data.total_comment_count || data.total_count || window[totalKey];
-          if (window.__xhs_api_info__) {
-            window.__xhs_api_info__.lastCursor = data.cursor || '';
-          }
           collect(data.comments);
-        }).catch(() => {});
+          console.log('[自启拦截器-' + getPlatformName() + '] 收集:', window[commentsKey].length, '/', window[totalKey]);
+        }).catch(function() {});
       }
       return r;
     });
   };
 
   // ===== 拦截 XHR =====
-  const X = XMLHttpRequest.prototype;
-  const _open = X.open, _send = X.send, _setRH = X.setRequestHeader;
-  let _u = '';
-  X.open = function (m, u, ...r) {
+  var X = XMLHttpRequest.prototype;
+  var _open = X.open, _send = X.send;
+  var _u = '';
+  X.open = function(m, u) {
     _u = typeof u === 'string' ? u : '';
-    this.__xhs_req_headers__ = {};
-    return _open.apply(this, [m, u, ...r]);
+    return _open.apply(this, arguments);
   };
-  X.setRequestHeader = function (name, value) {
-    this.__xhs_req_headers__ = this.__xhs_req_headers__ || {};
-    this.__xhs_req_headers__[name] = value;
-    return _setRH.apply(this, arguments);
-  };
-  X.send = function (...a) {
-    const url = _u;
-    const headers = { ...(this.__xhs_req_headers__ || {}) };
-    this.addEventListener('load', function () {
+  X.send = function() {
+    var url = _u;
+    var self = this;
+    self.addEventListener('load', function() {
       if (isCommentApi(url)) {
-        const parsedUrl = new URL(url, window.location.origin);
-        const allParams = {};
-        parsedUrl.searchParams.forEach((v, k) => { allParams[k] = v; });
-        window.__xhs_api_info__ = {
-          url: url.split('?')[0],
-          method: 'GET',
-          headers: headers,
-          body: null,
-          lastCursor: parsedUrl.searchParams.get('cursor') || '',
-          allParams: allParams,
-        };
-        console.log('[自启拦截器-XHR] 捕获, params:', Object.keys(allParams), 'headers:', Object.keys(headers));
         try {
-          const d = JSON.parse(this.responseText);
-          const data = d?.data || d;
+          var d = JSON.parse(self.responseText);
+          var data = d && d.data ? d.data : d;
           window[totalKey] = data.total_comment_count || data.total_count || window[totalKey];
-          if (window.__xhs_api_info__) {
-            window.__xhs_api_info__.lastCursor = data.cursor || '';
-          }
           collect(data.comments);
-        } catch (e) {}
+        } catch(e) {}
       }
     });
-    return _send.apply(this, a);
+    return _send.apply(this, arguments);
   };
 
-  console.log('[自启拦截器] 已注入 MAIN world (document_start)');
+  console.log('[自启拦截器-' + getPlatformName() + '] 已注入 (document_start)');
 })();

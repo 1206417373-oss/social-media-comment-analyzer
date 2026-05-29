@@ -76,17 +76,8 @@ analyzeBtn.addEventListener('click', async () => {
       });
     }
 
-    // ===== Step 1: 小红书拦截器已由 injected.js 在 document_start 自动注入 =====
-    // 抖音仍需手动注入（没有 content_script 预加载）
-    if (currentPlatform === 'douyin') {
-      setStatus('注入拦截器...', '');
-      await chrome.scripting.executeScript({
-        target: { tabId: currentTabId },
-        world: 'MAIN',
-        func: injectInterceptor,
-        args: [currentPlatform]
-      });
-    }
+    // ===== Step 1: 拦截器已由 injected.js 在 document_start 自动注入 =====
+    // 小红书和抖音都无需手动注入
 
     // ===== Step 2: 加载评论 =====
     // 小红书用 API 翻页（绕过DOM滚动问题），抖音用滚动
@@ -171,6 +162,7 @@ analyzeBtn.addEventListener('click', async () => {
           });
           const { count, total } = res.result;
           const pct = total > 0 ? Math.round(count / total * 100) : 0;
+          console.log('[popup] 抖音翻页:', count, '/', total, '(' + pct + '%) 轮:', i);
           setStatus(`已收集 ${count} / ${total} (${pct}%)`, '');
 
           if (total > 0 && count >= total) break;
@@ -496,6 +488,7 @@ function fetchNextCommentPage() {
       el.scrollTop = el.scrollHeight;
       count++;
     }
+    console.log('[scrollPage] 本轮滚动', count, '个元素');
     return { ok: true, scrolled: count };
   } catch (e) {
     return { ok: false, error: e.message };
