@@ -488,16 +488,32 @@ async function fetchFirstCommentPage() {
 // 滚动评论区触发页面自然翻页
 function fetchNextCommentPage() {
   try {
-    var all = document.querySelectorAll('*');
+    var tick = (window.__xhs_scroll_tick__ = (window.__xhs_scroll_tick__ || 0) + 1);
     var count = 0;
-    for (var i = 0; i < all.length; i++) {
-      var el = all[i];
-      if (el === document.body || el === document.documentElement) continue;
-      if (el.clientHeight === 0) continue;
-      if (el.scrollHeight <= el.clientHeight) continue;
+
+    // 找包含评论子元素的滚动容器（比全页面扫描更精准）
+    var commentKids = document.querySelectorAll('[class*="comment-item"], [class*="comment-inner"]');
+    var scrollParents = new Set();
+    for (var i = 0; i < commentKids.length; i++) {
+      var p = commentKids[i].parentElement;
+      while (p && p !== document.body) {
+        if (p.scrollHeight > p.clientHeight + 2) {
+          scrollParents.add(p);
+        }
+        p = p.parentElement;
+      }
+    }
+
+    // 滚动这些容器
+    scrollParents.forEach(function(el) {
+      // 每3轮做一次回弹（上滚200再滚到底）触发懒加载检测
+      if (tick % 3 === 0) {
+        el.scrollTop = Math.max(0, el.scrollTop - 300);
+      }
       el.scrollTop = el.scrollHeight;
       count++;
-    }
+    });
+
     return { ok: true, scrolled: count };
   } catch (e) {
     return { ok: false, error: e.message };
