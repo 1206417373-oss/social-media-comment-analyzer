@@ -296,6 +296,7 @@ function injectInterceptor(platform) {
         body: init.body ? (typeof init.body === 'string' ? init.body : JSON.stringify(init.body)) : null,
         lastCursor: cursor,
       };
+      console.log('[fetch拦截] 捕获API调用, headers keys:', Object.keys(init.headers || {}));
     }
 
     return _fetch.apply(this, args).then(r => {
@@ -318,18 +319,44 @@ function injectInterceptor(platform) {
 
   // 拦截 XHR
   const X = XMLHttpRequest.prototype;
-  const _open = X.open, _send = X.send;
+  const _open = X.open, _send = X.send, _setRH = X.setRequestHeader;
   let _u = '';
-  X.open = function (m, u, ...r) { _u = typeof u === 'string' ? u : ''; return _open.apply(this, [m, u, ...r]); };
+  X.open = function (m, u, ...r) {
+    _u = typeof u === 'string' ? u : '';
+    this.__xhs_req_headers__ = {};  // 记录本次请求头
+    return _open.apply(this, [m, u, ...r]);
+  };
+  X.setRequestHeader = function (name, value) {
+    this.__xhs_req_headers__ = this.__xhs_req_headers__ || {};
+    this.__xhs_req_headers__[name] = value;
+    return _setRH.apply(this, arguments);
+  };
   X.send = function (...a) {
     const url = _u;
+    const headers = { ...(this.__xhs_req_headers__ || {}) };
     this.addEventListener('load', function () {
       if (urlMatch(url)) {
+        // 记录API信息（XHR版），用于后续翻页
+        if (platform === 'xiaohongshu') {
+          const parsedUrl = new URL(url, window.location.origin);
+          const cursor = parsedUrl.searchParams.get('cursor') || '';
+          window.__xhs_api_info__ = {
+            url: url.split('?')[0],
+            method: 'GET',
+            headers: headers,
+            body: null,
+            lastCursor: cursor,
+          };
+          console.log('[XHR拦截] 捕获API调用, headers keys:', Object.keys(headers));
+        }
         try {
           const d = JSON.parse(this.responseText);
           const data = d?.data || d;
           if (platform === 'xiaohongshu') {
             window[totalKey] = data.total_comment_count || data.total_count || window[totalKey];
+            if (window.__xhs_api_info__) {
+              window.__xhs_api_info__.lastCursor = data.cursor || '';
+            }
           }
           collect(data.comments);
         } catch (e) { }
@@ -387,34 +414,77 @@ function resetCommentState(platform) {
   window.__scroll_tick__ = 0;
 }
 
-// 小红书专用：主动发起首屏评论请求
+// 小红书专用：触发页面自然加载评论，捕获XHS专用请求头
+// XHS API 需要 X-S/X-T 等签名头，只有页面自己发的请求才有
+// 我们的策略：滚动评论区 → 页面自然请求API → 拦截器捕获headers → 用这些headers翻页
 async function fetchFirstCommentPage() {
   console.log('[fetchFirstPage] ====== 开始执行 ======');
-  console.log('[fetchFirstPage] url:', window.location.href);
+
+  // 初始化存储
+  if (!window.__xhs_comments__) window.__xhs_comments__ = [];
+  if (!window.__xhs_seen__) window.__xhs_seen__ = new Set();
+  if (!window.__xhs_total__) window.__xhs_total__ = 0;
+
+  // 策略：触发页面自己的评论加载（通过滚动评论区），让拦截器捕获请求头
+  // 先尝试滚动各种可能的评论区容器
+  const scrollContainers = document.querySelectorAll('[class*="comment"], [class*="note-scroll"], [class*="detail"]');
+  console.log('[fetchFirstPage] 找到', scrollContainers.length, '个可能的滚动容器');
+  for (const el of scrollContainers) {
+    if (el.scrollHeight > el.clientHeight) {
+      el.scrollTop = el.scrollHeight;
+      console.log('[fetchFirstPage] 滚动容器:', el.className, 'scrollHeight:', el.scrollHeight);
+    }
+  }
+
+  // 等待拦截器捕获页面API调用（轮询 __xhs_api_info__ 获取有效headers）
+  console.log('[fetchFirstPage] 等待页面自然加载评论（拦截器捕获请求头）...');
+  for (let i = 0; i < 15; i++) {
+    await new Promise(r => setTimeout(r, 1000));
+    const info = window.__xhs_api_info__;
+    if (info && info.headers && Object.keys(info.headers).length > 0) {
+      console.log('[fetchFirstPage] 拦截器已捕获headers, comments:', window.__xhs_comments__.length);
+      return true;
+    }
+    // 继续滚动触发加载
+    for (const el of scrollContainers) {
+      if (el.scrollHeight > el.clientHeight) {
+        el.scrollTop = el.scrollHeight;
+      }
+    }
+    console.log('[fetchFirstPage] 等待中...', i + 1, '秒, comments:', window.__xhs_comments__.length);
+  }
+
+  // 超时：拦截器未捕获到页面API调用
+  console.warn('[fetchFirstPage] 超时：拦截器未捕获到API headers，comments:', window.__xhs_comments__.length);
+  return window.__xhs_comments__.length > 0;  // 如果拦截器至少收集了一些评论也算成功
+}
+
+// 小红书专用：主动调用API翻页
+// 用拦截器捕获的XHS请求头翻页（这些头是页面自己发请求时留下的）
+async function fetchNextCommentPage() {
+  const info = window.__xhs_api_info__;
+  if (!info || !info.lastCursor) { console.log('[fetchNextPage] 无cursor, 停止翻页'); return false; }
 
   const m = window.location.href.match(/\/explore\/([a-f0-9]{24})/);
-  if (!m) {
-    console.error('[fetchFirstPage] 无法提取noteId, url:', window.location.href);
-    return false;
-  }
+  if (!m) return false;
   const noteId = m[1];
-  console.log('[fetchFirstPage] noteId:', noteId);
 
   const apiUrl = 'https://www.xiaohongshu.com/api/sns/web/v2/comment/page?' +
-    new URLSearchParams({ note_id: noteId, cursor: '', top_comment_id: '', image_scenes: '' }).toString();
-  console.log('[fetchFirstPage] apiUrl:', apiUrl);
+    new URLSearchParams({ note_id: noteId, cursor: info.lastCursor, top_comment_id: '', image_scenes: '' }).toString();
+
+  // 使用拦截器捕获的headers（包含X-S等XHS签名头）
+  const headers = info.headers || {};
+  console.log('[fetchNextPage] 使用捕获的headers翻页, keys:', Object.keys(headers));
 
   try {
-    const resp = await fetch(apiUrl, { headers: { 'Accept': 'application/json' } });
-    console.log('[fetchFirstPage] resp status:', resp.status);
+    const resp = await fetch(apiUrl, { headers });
+    if (resp.status !== 200) {
+      console.error('[fetchNextPage] 状态码异常:', resp.status);
+      return false;
+    }
     const json = await resp.json();
     const data = json?.data || json;
     const comments = data?.comments || [];
-    console.log('[fetchFirstPage] comments count:', comments.length, 'total:', data.total_comment_count);
-
-    if (!window.__xhs_comments__) window.__xhs_comments__ = [];
-    if (!window.__xhs_seen__) window.__xhs_seen__ = new Set();
-    if (!window.__xhs_total__) window.__xhs_total__ = 0;
 
     let added = 0;
     comments.forEach(c => {
@@ -438,51 +508,9 @@ async function fetchFirstCommentPage() {
       });
     });
 
-    window.__xhs_total__ = data.total_comment_count || data.total_count || window.__xhs_total__;
-    window.__xhs_api_info__ = { lastCursor: data.cursor || '' };
-    console.log('[fetchFirstPage] 新增:', added, '总数:', window.__xhs_comments__.length);
-    return true;
-  } catch (e) {
-    console.error('[fetchFirstPage] 异常:', e.message, e.stack);
-    return false;
-  }
-}
-
-// 小红书专用：主动调用API翻页
-async function fetchNextCommentPage() {
-  const info = window.__xhs_api_info__;
-  if (!info || !info.lastCursor) { console.log('[fetchNextPage] 无cursor, 停止翻页'); return false; }
-
-  const m = window.location.href.match(/\/explore\/([a-f0-9]{24})/);
-  if (!m) return false;
-  const noteId = m[1];
-
-  const apiUrl = 'https://www.xiaohongshu.com/api/sns/web/v2/comment/page?' +
-    new URLSearchParams({ note_id: noteId, cursor: info.lastCursor, top_comment_id: '', image_scenes: '' }).toString();
-
-  try {
-    const resp = await fetch(apiUrl, { headers: { 'Accept': 'application/json' } });
-    const json = await resp.json();
-    const data = json?.data || json;
-    const comments = data?.comments || [];
-
-    const add = (text) => {
-      if (!text || !text.trim()) return;
-      const k = text.trim();
-      if (window.__xhs_seen__.has(k)) return;
-      window.__xhs_seen__.add(k);
-      window.__xhs_comments__.push(k);
-    };
-    comments.forEach(c => {
-      if (c.content) add(c.content);
-      (c.sub_comments || c.sub_comment_list || []).forEach(s => {
-        if (s.content) add(s.content);
-      });
-    });
-
     info.lastCursor = data.cursor || '';
-    console.log('[fetchNextPage] 本轮+', comments.length, '总数:', window.__xhs_comments__.length);
-    return !!data.cursor;  // has more
+    console.log('[fetchNextPage] 新增:', added, '总数:', window.__xhs_comments__.length, 'cursor:', data.cursor);
+    return !!data.cursor;
   } catch (e) {
     console.error('[fetchNextPage] fetch失败:', e);
     return false;
