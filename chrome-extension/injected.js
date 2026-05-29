@@ -64,8 +64,8 @@
             collect(data.comments);
             console.log('[自启拦截器-' + getPlatformName() + '] 收集:', window[commentsKey].length, '/', window[totalKey]);
           }).catch(function() {});
-        } else if (isDY && url.includes('/aweme/')) {
-          console.log('[DY诊断] 非评论API:', url.substring(0, 120));
+        } else if (isDY && url.includes('douyin.com') && !url.includes('.js') && !url.includes('.css') && !url.includes('.png') && !url.includes('.jpg') && !url.includes('.svg') && !url.includes('.webp')) {
+          console.log('[DY-ALL]', url.substring(0, 150));
         }
         return r;
       });
