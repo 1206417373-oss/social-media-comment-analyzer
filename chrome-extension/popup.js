@@ -59,6 +59,14 @@ analyzeBtn.addEventListener('click', async () => {
   analyzeBtn.textContent = '分析中...';
 
   try {
+    // ===== Step 0: 清空旧数据（SPA导航可能残留上个帖子的评论） =====
+    await chrome.scripting.executeScript({
+      target: { tabId: currentTabId },
+      world: 'MAIN',
+      func: resetCommentState,
+      args: [currentPlatform]
+    });
+
     // ===== Step 1: 注入拦截器到 MAIN world =====
     setStatus('注入拦截器...', '');
     await chrome.scripting.executeScript({
@@ -341,6 +349,16 @@ function injectInterceptor(platform) {
       }
     };
   }
+}
+
+// 清空旧评论数据，防止SPA导航时残留
+function resetCommentState(platform) {
+  const prefix = platform === 'douyin' ? '__dy' : '__xhs';
+  window[prefix + '_init__'] = false;
+  window[prefix + '_comments__'] = [];
+  window[prefix + '_total__'] = 0;
+  window.__xhs_api_info__ = null;
+  window.__scroll_tick__ = 0;
 }
 
 // 小红书专用：主动调用API翻页（不依赖DOM滚动）
