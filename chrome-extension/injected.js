@@ -42,27 +42,18 @@
   }
 
   function isCommentApi(url) {
-    if (isDY) {
-      // 抖音可能的评论API格式
-      if (url.includes('comment/list') || url.includes('comment/list/reply')) return true;
-      // 诊断：记录其他疑似API的请求
-      if (url.includes('/aweme/') || url.includes('/web/')) {
-        console.log('[DY诊断] 非评论API:', url.substring(0, 120));
-      }
-      return false;
-    }
+    if (isDY) return url.includes('comment/list') || url.includes('comment/list/reply');
     return url.includes('/api/sns/web') && url.includes('comment');
   }
 
   function getPlatformName() { return isDY ? '抖音' : '小红书'; }
 
-  // ===== 拦截 fetch =====
+  // ===== 拦截 fetch（用defineProperty防止被页面覆盖） =====
   var _fetch = window.fetch;
-  window.fetch = function () {
+  var wrappedFetch = function () {
     var args = arguments;
     var input = args[0];
     var url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
-    var init = args[1] || {};
 
     return _fetch.apply(this, args).then(function(r) {
       if (isCommentApi(url)) {
@@ -72,10 +63,25 @@
           collect(data.comments);
           console.log('[自启拦截器-' + getPlatformName() + '] 收集:', window[commentsKey].length, '/', window[totalKey]);
         }).catch(function() {});
+      } else if (url.includes('/aweme/')) {
+        console.log('[DY诊断] 非评论API:', url.substring(0, 120));
       }
       return r;
     });
   };
+
+  // 锁死fetch：页面替换时更新_fetch引用，但getter始终返回我们的wrapper
+  try {
+    Object.defineProperty(window, 'fetch', {
+      get: function() { return wrappedFetch; },
+      set: function(v) { _fetch = v; },
+      configurable: true, enumerable: true
+    });
+  } catch(e) {
+    // defineProperty不可用时降级
+    window.fetch = wrappedFetch;
+    console.log('[自启拦截器] defineProperty失败，降级为直接赋值');
+  }
 
   // ===== 拦截 XHR =====
   var X = XMLHttpRequest.prototype;
