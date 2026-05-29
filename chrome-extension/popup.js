@@ -80,12 +80,13 @@ analyzeBtn.addEventListener('click', async () => {
     // 小红书用 API 翻页（绕过DOM滚动问题），抖音用滚动
     if (currentPlatform === 'xiaohongshu') {
       setStatus('获取首屏评论...', '');
-      // 主动发起首屏请求，不依赖页面自然加载时机
-      await chrome.scripting.executeScript({
+      // 主动发起首屏请求
+      const [firstRes] = await chrome.scripting.executeScript({
         target: { tabId: currentTabId },
         world: 'MAIN',
         func: fetchFirstCommentPage
       });
+      console.log('[popup] fetchFirstPage result:', firstRes?.result);
       await sleep(2000);  // 等API响应+拦截器处理
 
       let prevCount = 0;
@@ -386,18 +387,32 @@ function resetCommentState(platform) {
   window.__scroll_tick__ = 0;
 }
 
-// 小红书专用：主动发起首屏评论请求
-function fetchFirstCommentPage() {
+// 小红书专用：主动发起首屏评论请求（async让executeScript正确等待Promise）
+async function fetchFirstCommentPage() {
+  console.log('[fetchFirstPage] fn exists:', !!window.__xhs_fetchFirstPage__);
   if (window.__xhs_fetchFirstPage__) {
-    return window.__xhs_fetchFirstPage__();
+    try {
+      const ok = await window.__xhs_fetchFirstPage__();
+      console.log('[fetchFirstPage] ok:', ok, 'comments:', window.__xhs_comments__?.length);
+      return ok;
+    } catch (e) {
+      console.error('[fetchFirstPage] error:', e);
+      return false;
+    }
   }
   return false;
 }
 
 // 小红书专用：主动调用API翻页
-function fetchNextCommentPage() {
+async function fetchNextCommentPage() {
   if (window.__xhs_fetchNextPage__) {
-    return window.__xhs_fetchNextPage__();
+    try {
+      const ok = await window.__xhs_fetchNextPage__();
+      return ok;
+    } catch (e) {
+      console.error('[fetchNextPage] error:', e);
+      return false;
+    }
   }
   return false;
 }
@@ -524,47 +539,11 @@ function extractAllData(platform) {
   let comments = [...dedup];
   console.log('[提取数据] 原始条数:', rawArr.length, '去重后:', comments.length);
 
-  // DOM 兜底：如果拦截器没抓到，从 DOM 里提取
+  // DOM 兜底已关闭：之前因为拦截器没抓到评论就乱抓页面文字
+  // 现在页面内容由 fetch/XHR 拦截器+API翻页负责，不依赖DOM
   if (!comments.length) {
-    const seen = new Set();
-    const addDom = (el) => {
-      const t = (el.innerText || el.textContent || '').trim();
-      if (t && t.length > 1 && !seen.has(t)) { seen.add(t); comments.push(t); }
-    };
-
-    if (platform === 'douyin') {
-      // 抖音评论区DOM
-      document.querySelectorAll(
-        '[class*="comment-item"], [class*="CommentItem"], [class*="comment-content"]'
-      ).forEach(addDom);
-      const container = document.querySelector(
-        '.comment-mainContent, [class*="comment"][class*="list"], [class*="CommentListContainer"]'
-      );
-      if (container) {
-        container.querySelectorAll('p, span, div').forEach(el => {
-          const t = (el.innerText || '').trim();
-          if (t.length > 2 && t.length < 500 && el.children.length === 0 && !seen.has(t)) {
-            seen.add(t); comments.push(t);
-          }
-        });
-      }
-    } else {
-      // 小红书评论区DOM
-      document.querySelectorAll(
-        '[class*="comment-item"], [class*="commentItem"], [class*="comment"]:not([class*="container"]):not([class*="wrapper"])'
-      ).forEach(addDom);
-      const container = document.querySelector(
-        '.comment-container, [class*="comment"][class*="container"], [class*="comments"], [class*="comment-wrapper"]'
-      );
-      if (container) {
-        container.querySelectorAll('p, span, div').forEach(el => {
-          const t = (el.innerText || '').trim();
-          if (t.length > 2 && t.length < 500 && el.children.length === 0 && !seen.has(t)) {
-            seen.add(t); comments.push(t);
-          }
-        });
-      }
-    }
+    console.log('[提取数据] 拦截器未捕获评论，跳过DOM兜底。window keys:',
+      Object.keys(window).filter(k => k.includes('__xhs') || k.includes('__dy')));
   }
 
   return {
