@@ -68,43 +68,91 @@ analyzeBtn.addEventListener('click', async () => {
       args: [currentPlatform]
     });
 
-    // ===== Step 2: 滚动加载评论 =====
-    setStatus('滚动加载评论...', '');
-    let prevCount = 0;
-    let staleCount = 0;  // 连续无增长次数
-    const MAX_STALE = 3; // 连续3轮不增长才退出（30秒）
-    const MAX_ITER = 80;
+    // ===== Step 2: 加载评论 =====
+    // 小红书用 API 翻页（绕过DOM滚动问题），抖音用滚动
+    if (currentPlatform === 'xiaohongshu') {
+      setStatus('等待首页评论加载...', '');
+      // 先等页面自己加载首屏评论（等拦截器捕获API信息）
+      await sleep(3000);
 
-    for (let i = 0; i < MAX_ITER; i++) {
-      await chrome.scripting.executeScript({
-        target: { tabId: currentTabId },
-        world: 'MAIN',
-        func: scrollToLoadComments,
-        args: [currentPlatform]
-      });
-      await sleep(1000);
+      let prevCount = 0;
+      let staleCount = 0;
+      const MAX_STALE = 3;
+      const MAX_PAGES = 25;  // 最多翻25页（500条）
 
-      if (i % 10 === 0) {
-        const [res] = await chrome.scripting.executeScript({
+      for (let i = 0; i < MAX_PAGES; i++) {
+        // 调用主动翻页函数
+        const [fetchRes] = await chrome.scripting.executeScript({
           target: { tabId: currentTabId },
           world: 'MAIN',
-          func: getProgress,
-          args: [currentPlatform]
+          func: fetchNextCommentPage
         });
-        const { count, total } = res.result;
-        const totalStr = total > 0 ? ` / ${total}` : '';
-        setStatus(`已收集 ${count}${totalStr} 条评论...`, '');
 
-        // 有数据后，连续3轮（30秒）不增长才提前退出
-        if (i > 20 && count > 0) {
-          if (count === prevCount) {
-            staleCount++;
-            if (staleCount >= MAX_STALE) break;
-          } else {
-            staleCount = 0;  // 有新数据，重置计数
+        if (fetchRes.result === false) break;  // 没有更多页了
+
+        await sleep(1500);  // 等API响应+拦截器处理
+
+        // 每2页检查一次进度
+        if (i % 2 === 0) {
+          const [res] = await chrome.scripting.executeScript({
+            target: { tabId: currentTabId },
+            world: 'MAIN',
+            func: getProgress,
+            args: [currentPlatform]
+          });
+          const { count, total } = res.result;
+          const totalStr = total > 0 ? ` / ${total}` : '';
+          setStatus(`已收集 ${count}${totalStr} 条评论...`, '');
+
+          if (count > 0) {
+            if (count === prevCount) {
+              staleCount++;
+              if (staleCount >= MAX_STALE) break;
+            } else {
+              staleCount = 0;
+            }
+            prevCount = count;
           }
         }
-        prevCount = count;
+      }
+    } else {
+      // 抖音：滚动加载
+      setStatus('滚动加载评论...', '');
+      let prevCount = 0;
+      let staleCount = 0;
+      const MAX_STALE = 3;
+      const MAX_ITER = 80;
+
+      for (let i = 0; i < MAX_ITER; i++) {
+        await chrome.scripting.executeScript({
+          target: { tabId: currentTabId },
+          world: 'MAIN',
+          func: scrollToLoadComments,
+          args: [currentPlatform]
+        });
+        await sleep(1000);
+
+        if (i % 10 === 0) {
+          const [res] = await chrome.scripting.executeScript({
+            target: { tabId: currentTabId },
+            world: 'MAIN',
+            func: getProgress,
+            args: [currentPlatform]
+          });
+          const { count, total } = res.result;
+          const totalStr = total > 0 ? ` / ${total}` : '';
+          setStatus(`已收集 ${count}${totalStr} 条评论...`, '');
+
+          if (i > 20 && count > 0) {
+            if (count === prevCount) {
+              staleCount++;
+              if (staleCount >= MAX_STALE) break;
+            } else {
+              staleCount = 0;
+            }
+          }
+          prevCount = count;
+        }
       }
     }
 
@@ -184,11 +232,9 @@ function injectInterceptor(platform) {
   let collect, urlMatch;
 
   if (platform === 'douyin') {
-    // 抖音：拦截评论列表和子回复 API
     urlMatch = (url) =>
       url.includes('/aweme/v1/web/comment/list/') ||
       url.includes('/aweme/v1/web/comment/list/reply/');
-
     collect = (items) => {
       (items || []).forEach(c => {
         if (c.content) add(c.content);
@@ -196,10 +242,10 @@ function injectInterceptor(platform) {
       });
     };
   } else {
-    // 小红书：拦截评论 API
+    // 小红书：记录API调用信息，用于后续主动翻页
+    window.__xhs_api_info__ = null;
     urlMatch = (url) =>
       url.includes('/api/sns/web') && url.includes('comment');
-
     collect = (items) => {
       (items || []).forEach(c => {
         if (c.content) add(c.content);
@@ -215,12 +261,31 @@ function injectInterceptor(platform) {
   window.fetch = function (...args) {
     const input = args[0];
     const url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
+    const init = args[1] || {};
+
+    // 记录XHS评论API调用信息，供主动翻页使用
+    if (platform === 'xiaohongshu' && urlMatch(url)) {
+      const parsedUrl = new URL(url, window.location.origin);
+      const cursor = parsedUrl.searchParams.get('cursor') || '';
+      window.__xhs_api_info__ = {
+        url: url.split('?')[0],  // base URL without query
+        method: (init.method || 'GET').toUpperCase(),
+        headers: { ...init.headers },
+        body: init.body ? (typeof init.body === 'string' ? init.body : JSON.stringify(init.body)) : null,
+        lastCursor: cursor,
+      };
+    }
+
     return _fetch.apply(this, args).then(r => {
       if (urlMatch(url)) {
         r.clone().json().then(d => {
           const data = d?.data || d;
           if (platform === 'xiaohongshu') {
             window[totalKey] = data.total_comment_count || data.total_count || window[totalKey];
+            // 更新cursor
+            if (window.__xhs_api_info__) {
+              window.__xhs_api_info__.lastCursor = data.cursor || '';
+            }
           }
           collect(data.comments);
         }).catch(() => {});
@@ -250,34 +315,90 @@ function injectInterceptor(platform) {
     });
     return _send.apply(this, a);
   };
+
+  // 小红书：暴露主动翻页函数，绕过DOM滚动
+  if (platform === 'xiaohongshu') {
+    window.__xhs_fetchNextPage__ = async function () {
+      const info = window.__xhs_api_info__;
+      if (!info || !info.lastCursor) return false;
+
+      const nextUrl = info.url + '?' + new URLSearchParams({
+        note_id: new URL(info.url, window.location.origin).searchParams.get('note_id') || '',
+        cursor: info.lastCursor,
+        top_comment_id: '',
+        image_scenes: '',
+      }).toString();
+
+      try {
+        await window.fetch(nextUrl, {
+          method: info.method,
+          headers: info.headers,
+          body: info.body,
+        });
+        return true;
+      } catch (e) {
+        return false;
+      }
+    };
+  }
+}
+
+// 小红书专用：主动调用API翻页（不依赖DOM滚动）
+function fetchNextCommentPage() {
+  if (window.__xhs_fetchNextPage__) {
+    return window.__xhs_fetchNextPage__();
+  }
+  return false;
 }
 
 function scrollToLoadComments(platform) {
-  // 每隔几次滚动先回滚一点再往下，触发懒加载重新检测
   const tick = (window.__scroll_tick__ || 0) + 1;
   window.__scroll_tick__ = tick;
 
-  // 先滚页面到底
-  window.scrollTo(0, document.body.scrollHeight);
-
-  // 评论区容器选择器
-  const selectors = platform === 'douyin'
-    ? ['.comment-mainContent', '[class*="comment"][class*="list"]', '[class*="CommentListContainer"]', '[class*="comment-container"]']
-    : ['.comment-container', '[class*="comment"][class*="container"]', '[class*="comments"]', '[class*="comment-wrapper"]', '[class*="note-comment"]'];
-
-  let container = null;
-  for (const sel of selectors) {
-    container = document.querySelector(sel);
-    if (container) break;
-  }
-
-  if (container) {
-    // 每5轮做一次"微回滚再滚到底"，强制触发懒加载检测
-    if (tick % 5 === 0) {
-      container.scrollTop = Math.max(0, container.scrollTop - 200);
+  if (platform === 'douyin') {
+    // 抖音：评论区在页面内或侧边面板，滚 window + 评论区容器
+    window.scrollTo(0, document.body.scrollHeight);
+    const dySelectors = ['.comment-mainContent', '[class*="comment"][class*="list"]', '[class*="CommentListContainer"]', '[class*="comment-container"]'];
+    for (const sel of dySelectors) {
+      const c = document.querySelector(sel);
+      if (c) { c.scrollTop = c.scrollHeight; break; }
     }
-    // 滚到底部
-    container.scrollTop = container.scrollHeight;
+  } else {
+    // 小红书：帖子是浮层，绝对不能滚 window（会滚到背后的首页）
+    // 策略：扫描页面上所有可滚动元素，逐个滚到底
+    let scrolledAny = false;
+
+    // 1. 优先滚已知的评论区容器
+    const xhsSelectors = [
+      '.comment-container', '[class*="comment-container"]', '[class*="comment-list"]',
+      '[class*="CommentList"]', '[class*="comment-wrapper"]', '[class*="comments"]',
+      '.note-scroller', '[class*="note-scroller"]', '[class*="detail-scroll"]',
+    ];
+    for (const sel of xhsSelectors) {
+      const c = document.querySelector(sel);
+      if (c && c.scrollHeight > c.clientHeight + 10) {
+        if (tick % 5 === 0) c.scrollTop = Math.max(0, c.scrollTop - 200);
+        c.scrollTop = c.scrollHeight;
+        scrolledAny = true;
+      }
+    }
+
+    // 2. 兜底：扫描全部可滚动元素（排除 body/html 和不可见的）
+    if (!scrolledAny) {
+      const all = document.querySelectorAll('*');
+      for (const el of all) {
+        if (el === document.body || el === document.documentElement) continue;
+        if (el.scrollHeight <= el.clientHeight + 10) continue;
+        // 跳过隐藏元素
+        const style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden') continue;
+        if (el.offsetHeight === 0) continue;
+
+        if (tick % 5 === 0) el.scrollTop = Math.max(0, el.scrollTop - 200);
+        el.scrollTop = el.scrollHeight;
+        scrolledAny = true;
+      }
+    }
   }
 }
 
