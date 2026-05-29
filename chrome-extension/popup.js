@@ -419,9 +419,9 @@ function checkAndResetIfNewPost() {
   const currentNoteId = m ? m[1] : '';
   const lastNoteId = window.__xhs_last_note_id__ || '';
 
-  if (currentNoteId && currentNoteId !== lastNoteId) {
-    // 切换到新帖子，清空旧数据
-    console.log('[checkAndReset] 检测到新帖子:', currentNoteId, '旧:', lastNoteId, '清空数据');
+  if (lastNoteId && currentNoteId !== lastNoteId) {
+    // 已有一个旧帖子，且切换到不同帖子 → 清空旧数据
+    console.log('[checkAndReset] SPA切换帖子:', lastNoteId, '→', currentNoteId, '清空数据');
     window.__xhs_comments__ = [];
     window.__xhs_total__ = 0;
     window.__xhs_seen__ && window.__xhs_seen__.clear();
