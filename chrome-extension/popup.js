@@ -510,17 +510,25 @@ async function fetchNextCommentPage() {
   if (!m) return false;
   const noteId = m[1];
 
+  // 提取 xsec_token（小红书的CSRF token，页面URL和API都需要）
+  const xsecMatch = window.location.href.match(/[?&]xsec_token=([^&]+)/);
+  const xsecToken = xsecMatch ? decodeURIComponent(xsecMatch[1]) : '';
+
   const apiUrl = 'https://www.xiaohongshu.com/api/sns/web/v2/comment/page?' +
-    new URLSearchParams({ note_id: noteId, cursor: info.lastCursor, top_comment_id: '', image_scenes: '' }).toString();
+    new URLSearchParams({
+      note_id: noteId, cursor: info.lastCursor, top_comment_id: '', image_scenes: '',
+      ...(xsecToken ? { xsec_token: xsecToken } : {})
+    }).toString();
 
   // 使用拦截器捕获的headers（包含X-S等XHS签名头）
   const headers = info.headers || {};
-  console.log('[fetchNextPage] 使用捕获的headers翻页, keys:', Object.keys(headers));
+  console.log('[fetchNextPage] 翻页 cursor:', info.lastCursor, 'xsec:', !!xsecToken);
 
   try {
     const resp = await fetch(apiUrl, { headers });
+    console.log('[fetchNextPage] resp status:', resp.status);
     if (resp.status !== 200) {
-      console.error('[fetchNextPage] 状态码异常:', resp.status);
+      console.error('[fetchNextPage] 状态码异常:', resp.status, await resp.text().catch(() => ''));
       return false;
     }
     const json = await resp.json();
