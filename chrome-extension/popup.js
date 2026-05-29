@@ -92,6 +92,19 @@ analyzeBtn.addEventListener('click', async () => {
     // 小红书用 API 翻页（绕过DOM滚动问题），抖音用滚动
     if (currentPlatform === 'xiaohongshu') {
       setStatus('检查已有评论...', '');
+
+      // 诊断：先注入最简单的测试函数确认executeScript是否工作
+      const [testRes] = await chrome.scripting.executeScript({
+        target: { tabId: currentTabId },
+        world: 'MAIN',
+        func: () => {
+          console.log('[DIAG] executeScript注入成功, comments:', window.__xhs_comments__?.length, 'api_info:', !!window.__xhs_api_info__, 'cursor:', window.__xhs_api_info__?.lastCursor);
+          return window.__xhs_comments__?.length || 0;
+        }
+      });
+      console.log('[popup] DIAG result:', testRes?.result);
+      setStatus('诊断: ' + (testRes?.result || 0) + '条评论', '');
+
       const [firstRes] = await chrome.scripting.executeScript({
         target: { tabId: currentTabId },
         world: 'MAIN',
