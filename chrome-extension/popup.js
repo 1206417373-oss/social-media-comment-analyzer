@@ -483,8 +483,15 @@ async function fetchFirstCommentPage() {
   // 等待拦截器捕获页面API调用
   // 如果已有评论说明拦截器已工作，直接成功
   if (window.__xhs_comments__.length > 0) {
-    console.log('[fetchFirstPage] 拦截器已收集', window.__xhs_comments__.length, '条评论，跳过等待');
-    // 确保有 cursor（拦截器会从响应里更新）
+    const info = window.__xhs_api_info__;
+    console.log('[fetchFirstPage] 已有', window.__xhs_comments__.length, '条评论');
+    console.log('[fetchFirstPage] __xhs_api_info__:', JSON.stringify({
+      hasInfo: !!info,
+      hasLastCursor: !!(info && info.lastCursor),
+      lastCursor: info ? info.lastCursor : 'N/A',
+      hasHeaders: !!(info && info.headers && Object.keys(info.headers).length > 0),
+      hasAllParams: !!(info && info.allParams && Object.keys(info.allParams).length > 0)
+    }));
     return true;
   }
 
