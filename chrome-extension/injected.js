@@ -8,7 +8,7 @@
   if (!url.includes('xiaohongshu.com')) return;
   var isXHS = true;
 
-  var prefix = isDY ? '__dy' : '__xhs';
+  var prefix = '__xhs';
   var readyKey = prefix + '_interceptor_ready__';
   if (window[readyKey]) return;
   window[readyKey] = true;
@@ -53,11 +53,17 @@
 
     return _fetch.apply(this, args).then(function(r) {
       if (isCommentApi(url)) {
+        console.log('[fetch拦截] 捕获评论API:', url.substring(0, 120));
         r.clone().json().then(function(d) {
           var data = d && d.data ? d.data : d;
-          window[totalKey] = data.total_comment_count || data.total_count || window[totalKey];
-          collect(data.comments);
-        }).catch(function() {});
+          var count = data.total_comment_count || data.total_count || 0;
+          var comments = data.comments || [];
+          window[totalKey] = count || window[totalKey];
+          console.log('[fetch拦截] total=' + count + ', 本页' + comments.length + '条');
+          collect(comments);
+        }).catch(function(e) {
+          console.error('[fetch拦截] JSON解析失败:', e);
+        });
       }
       return r;
     });
@@ -76,12 +82,18 @@
     var self = this;
     self.addEventListener('load', function() {
       if (isCommentApi(url)) {
+        console.log('[XHR拦截] 捕获评论API:', url.substring(0, 120));
         try {
           var d = JSON.parse(self.responseText);
           var data = d && d.data ? d.data : d;
-          window[totalKey] = data.total_comment_count || data.total_count || window[totalKey];
-          collect(data.comments);
-        } catch(e) {}
+          var count = data.total_comment_count || data.total_count || 0;
+          var comments = data.comments || [];
+          window[totalKey] = count || window[totalKey];
+          console.log('[XHR拦截] total=' + count + ', 本页' + comments.length + '条');
+          collect(comments);
+        } catch(e) {
+          console.error('[XHR拦截] JSON解析失败:', e);
+        }
       }
     });
     return _send.apply(this, arguments);

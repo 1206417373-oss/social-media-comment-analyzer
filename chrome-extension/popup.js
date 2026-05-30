@@ -454,24 +454,42 @@ function resetCommentState(platform) {
   window.__scroll_tick__ = 0;
 }
 
-// 小红书专用：滚动评论区 + 等待拦截器捕获首屏评论
+// 小红书专用：主动调用评论API（兜底） + 滚动评论区触发页面自然加载
 async function fetchFirstCommentPage() {
   if (!window.__xhs_comments__) window.__xhs_comments__ = [];
   if (!window.__xhs_seen__) window.__xhs_seen__ = new Set();
 
   // 如果拦截器已有评论，直接成功
   if (window.__xhs_comments__.length > 0) {
-    console.log('[fetchFirstPage] 已有', window.__xhs_comments__.length, '条评论');
+    console.log('[fetchFirstPage] 已有', window.__xhs_comments__.length, '条评论（拦截器预捕获）');
     return true;
   }
 
-  // 滚动评论区触发首次加载
+  // ★ 主动调用首屏API兜底（防止页面还没触发评论加载）
+  const noteIdMatch = window.location.href.match(/\/explore\/([a-f0-9]{24})/);
+  const noteId = noteIdMatch ? noteIdMatch[1] : '';
+  if (noteId) {
+    console.log('[fetchFirstPage] 主动请求首屏评论API, noteId:', noteId);
+    try {
+      const apiUrl = 'https://www.xiaohongshu.com/api/sns/web/v2/comment/page?' +
+        new URLSearchParams({ note_id: noteId, cursor: '', top_comment_id: '', image_scenes: '' }).toString();
+      await window.fetch(apiUrl, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        credentials: 'include'
+      });
+    } catch (e) {
+      console.error('[fetchFirstPage] API请求异常:', e.message);
+    }
+  }
+
+  // 滚动评论区触发页面自然加载
   const containers = document.querySelectorAll('[class*="comment"], [class*="note-scroll"]');
   for (const el of containers) {
     if (el.scrollHeight > el.clientHeight) el.scrollTop = el.scrollHeight;
   }
 
-  // 最多等10秒
+  // 最多等10秒（页面自然加载 + 主动API双重保障）
   for (let i = 0; i < 10; i++) {
     await new Promise(r => setTimeout(r, 1000));
     if (window.__xhs_comments__.length > 0) {
@@ -483,8 +501,7 @@ async function fetchFirstCommentPage() {
   return false;
 }
 
-// 小红书专用：主动调用API翻页
-// 全页面滚动触发自然翻页
+// 翻页：全页面滚动触发页面自然加载（页面自己的请求带正确XHS签名）
 function fetchNextCommentPage() {
   try {
     var all = document.querySelectorAll('*');
