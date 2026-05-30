@@ -3,11 +3,10 @@
  * 支持小红书 + 抖音，页面JS执行前包装 fetch/XHR。
  */
 (function init() {
-  // 检测平台
+  // 仅在XHS生效（抖音用手动注入，避免fetch包装冲突）
   var url = window.location.href;
-  var isXHS = url.includes('xiaohongshu.com');
-  var isDY = url.includes('douyin.com');
-  if (!isXHS && !isDY) return;
+  if (!url.includes('xiaohongshu.com')) return;
+  var isXHS = true;
 
   var prefix = isDY ? '__dy' : '__xhs';
   var readyKey = prefix + '_interceptor_ready__';
@@ -42,50 +41,27 @@
   }
 
   function isCommentApi(url) {
-    if (isDY) return url.includes('comment/list') || url.includes('comment/list/reply');
     return url.includes('/api/sns/web') && url.includes('comment');
   }
 
-  function getPlatformName() { return isDY ? '抖音' : '小红书'; }
-
   // ===== 拦截 fetch =====
   var _fetch = window.fetch;
-  function makeWrapper() {
-    return function () {
-      var args = arguments;
-      var input = args[0];
-      var url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
+  window.fetch = function () {
+    var args = arguments;
+    var input = args[0];
+    var url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
 
-      return _fetch.apply(this, args).then(function(r) {
-        if (isCommentApi(url)) {
-          r.clone().json().then(function(d) {
-            var data = d && d.data ? d.data : d;
-            window[totalKey] = data.total_comment_count || data.total_count || window[totalKey];
-            collect(data.comments);
-            console.log('[自启拦截器-' + getPlatformName() + '] 收集:', window[commentsKey].length, '/', window[totalKey]);
-          }).catch(function() {});
-        } else if (isDY && url.includes('douyin.com') && !url.includes('.js') && !url.includes('.css') && !url.includes('.png') && !url.includes('.jpg') && !url.includes('.svg') && !url.includes('.webp')) {
-          console.log('[DY-ALL]', url.substring(0, 150));
-        }
-        return r;
-      });
-    };
-  }
-  window.fetch = makeWrapper();
-
-  // 防覆盖：每2秒检查fetch是否被页面替换，被替换就重新包装
-  var checkCount = 0;
-  var checkTimer = setInterval(function() {
-    if (checkCount++ > 60) { clearInterval(checkTimer); return; } // 2分钟后停止
-    if (window.fetch !== window.__our_fetch_ref__) {
-      console.log('[自启拦截器] fetch被覆盖，重新包装 (第' + checkCount + '次检查)');
-      _fetch = window.fetch;  // 捕获新引用
-      var w = makeWrapper();
-      window.fetch = w;
-      window.__our_fetch_ref__ = w;
-    }
-  }, 2000);
-  window.__our_fetch_ref__ = window.fetch;
+    return _fetch.apply(this, args).then(function(r) {
+      if (isCommentApi(url)) {
+        r.clone().json().then(function(d) {
+          var data = d && d.data ? d.data : d;
+          window[totalKey] = data.total_comment_count || data.total_count || window[totalKey];
+          collect(data.comments);
+        }).catch(function() {});
+      }
+      return r;
+    });
+  };
 
   // ===== 拦截 XHR =====
   var X = XMLHttpRequest.prototype;
@@ -111,5 +87,5 @@
     return _send.apply(this, arguments);
   };
 
-  console.log('[自启拦截器-' + getPlatformName() + '] 已注入 (document_start)');
+  console.log('[自启拦截器] 已注入 (document_start)');
 })();
